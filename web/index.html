@@ -1,8 +1,149 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Spatial Relay | Laptop AR Viewer</title><link rel="stylesheet" href="/viewer.css"></head>
-<body><main><header><div class="brand"><i></i> SPATIAL RELAY <span>LAB VIEWER</span></div><div id="connection" class="status"><b></b> CONNECTING</div></header>
-<section class="intro"><div><p>FIXED REFERENCE CAMERA</p><h1>Remote human<br><em>visualization.</em></h1><span>World origin = laptop webcam at calibration.</span></div><div class="actions"><button id="startCamera">Start laptop camera</button><button id="calibrate" disabled>Calibrate laptop origin</button></div></section>
-<section class="stage"><video id="video" autoplay playsinline muted></video><canvas id="overlay"></canvas><div id="empty" class="empty"><strong>Camera off</strong><small>Start the laptop webcam, place the phone beside it, then calibrate.</small></div><div class="hud tl">CAM_01 / LAPTOP WORLD ORIGIN</div><div id="targetReadout" class="hud br">AWAITING PHONE TARGET</div></section>
-<section class="details"><article><small>CALIBRATION</small><b id="calibrationStatus">Laptop not calibrated</b><span>Use the phone and webcam in the same position and direction.</span></article><article><small>PHONE POSE IN WORLD</small><b id="phonePose">—</b><span>Position, metres</span></article><article><small>TARGET IN LAPTOP FRAME</small><b id="targetPose">—</b><span>Canonical ARKit coordinates, metres</span></article><article><small>WEBCAM INTRINSICS</small><b id="intrinsics">Checking…</b><span>Run checkerboard calibration for precise overlays.</span></article></section>
-<section class="guide"><h2>Live workflow</h2><ol><li>Start hub and open this page at <code>http://localhost:8000</code></li><li>Start webcam and calibrate while phone lens matches webcam position</li><li>Start the iPhone Observer app on the same Wi‑Fi</li><li>Move phone and point it at a person. The laptop receives world-space coordinates.</li></ol></section>
-</main><script src="/viewer.js"></script></body></html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Spatial Relay | Laptop AR Viewer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/viewer.css">
+</head>
+<body>
+  <div class="glow-bg"></div>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-glyph"><i></i></span>
+      <span class="brand-title">SPATIAL RELAY <span class="badge-sub">AR CONSOLE</span></span>
+    </div>
+    <div class="header-status">
+      <div id="connection" class="status-pill"><span class="dot"></span> CONNECTING TO HUB</div>
+    </div>
+  </header>
+
+  <main>
+    <section class="intro-bar">
+      <div>
+        <span class="eyebrow">FIXED REFERENCE &bull; SHARED COORDINATES</span>
+        <h1>Laptop AR Observer</h1>
+        <p class="lede">Laptop camera fixed at origin <code>(0,0,0)</code>. Visualizes detected persons in shared 3D space with viewing frustum gating.</p>
+      </div>
+      <div class="actions">
+        <button id="startCamera" class="btn primary">Start laptop camera</button>
+        <button id="calibrate" class="btn secondary">Reset origin (0,0)</button>
+      </div>
+    </section>
+
+    <!-- Main Workspace: AR Viewport & Shared 2D Map -->
+    <div class="workspace-grid">
+      <!-- Left: AR Camera Viewport -->
+      <section class="stage-card">
+        <div class="card-header">
+          <span class="card-title">AR WEBCAM VIEWPORT</span>
+          <span id="targetStatusBadge" class="badge-state state-awaiting">AWAITING TARGET</span>
+        </div>
+        <div class="stage">
+          <video id="video" autoplay playsinline muted></video>
+          <canvas id="overlay"></canvas>
+          <div id="empty" class="empty">
+            <div class="empty-icon">&#9964;</div>
+            <strong>Camera off</strong>
+            <small>Start laptop camera to visualize augmented human overlays in real time.</small>
+          </div>
+          <div class="hud tl">CAM_01 / LAPTOP ORIGIN (0,0,0)</div>
+          <div id="targetReadout" class="hud br">AWAITING PHONE TARGET</div>
+        </div>
+
+        <!-- Observer Camera Rotation Controls -->
+        <div class="camera-controls">
+          <div class="ctrl-header">
+            <span class="label">LAPTOP CAMERA HEADING (YAW)</span>
+            <span id="laptopYawVal" class="val">0&deg; (Facing +Z Forward)</span>
+          </div>
+          <div class="slider-row">
+            <input id="laptopYawSlider" type="range" min="-90" max="90" value="0" step="1">
+            <button id="resetLaptopYaw" class="tiny-btn">Center 0&deg;</button>
+          </div>
+          <div class="quick-yaw">
+            <button class="yaw-preset" data-yaw="-45">&minus;45&deg; (Turn Left)</button>
+            <button class="yaw-preset active" data-yaw="0">0&deg; (Forward)</button>
+            <button class="yaw-preset" data-yaw="45">+45&deg; (Turn Right)</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right: Interactive 2D Floor Map & Phone Telemetry -->
+      <aside class="sidebar-stack">
+        <!-- 2D Spatial Floor Map -->
+        <section class="panel map-panel">
+          <div class="card-header">
+            <span class="card-title">TOP-DOWN SHARED ROOM MAP</span>
+            <span class="scale-info">1 GRID = 1 METRE</span>
+          </div>
+          <div class="map-container">
+            <canvas id="floorMap" width="400" height="340"></canvas>
+            <div class="map-legend">
+              <span><i class="legend-laptop"></i> Laptop (0,0)</span>
+              <span><i class="legend-phone"></i> Phone</span>
+              <span><i class="legend-target"></i> Target</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- Live Metrics Grid -->
+        <section class="panel telemetry-panel">
+          <div class="card-header">
+            <span class="card-title">COORDINATE TELEMETRY</span>
+            <span class="sub-label">Real-time metrics</span>
+          </div>
+          <div class="metric-grid">
+            <article class="metric-card">
+              <small>PHONE POSE (IN ROOM)</small>
+              <b id="phonePose">X: +1.00 &bull; Z: +1.00</b>
+              <span id="phoneHeadingText">Heading: 0&deg; (+Z)</span>
+            </article>
+            <article class="metric-card">
+              <small>TARGET (SHARED WORLD)</small>
+              <b id="targetWorld">X: &mdash; &bull; Z: &mdash;</b>
+              <span id="targetWorldSub">Waiting for detection</span>
+            </article>
+            <article class="metric-card">
+              <small>TARGET (IN LAPTOP FRAME)</small>
+              <b id="targetLaptop">x: &mdash; &bull; z: &mdash;</b>
+              <span id="viewGatingStatus">&mdash;</span>
+            </article>
+            <article class="metric-card">
+              <small>WEBCAM INTRINSICS</small>
+              <b id="intrinsics">Checking…</b>
+              <span>Field of view &bull; projection</span>
+            </article>
+          </div>
+
+          <!-- Direct Phone Position Controls from Laptop -->
+          <div class="laptop-phone-ctrl">
+            <span class="mini-title">QUICK ADJUST PHONE POSITION (FROM LAPTOP):</span>
+            <div class="ctrl-grid">
+              <div class="ctrl-cell">
+                <label for="lpPhoneX">Phone X (m):</label>
+                <input id="lpPhoneX" type="number" step="0.5" value="1.00">
+              </div>
+              <div class="ctrl-cell">
+                <label for="lpPhoneZ">Phone Z (m):</label>
+                <input id="lpPhoneZ" type="number" step="0.5" value="1.00">
+              </div>
+            </div>
+            <div class="preset-scenarios">
+              <button class="scene-btn" id="sceneFront">Preset: Phone in front of wall (X=1, Z=2)</button>
+              <button class="scene-btn" id="sceneBehind">Preset: Phone behind laptop (X=0, Z=-1.5)</button>
+              <button class="scene-btn" id="sceneLeft">Preset: Phone to the left (X=-2, Z=2)</button>
+            </div>
+          </div>
+        </section>
+      </aside>
+    </div>
+  </main>
+
+  <script src="/viewer.js"></script>
+</body>
+</html>

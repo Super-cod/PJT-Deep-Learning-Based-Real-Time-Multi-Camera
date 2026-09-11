@@ -1,11 +1,132 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Spatial Relay | Phone Sensor</title><link rel="stylesheet" href="/phone.css"></head>
-<body><header><a href="/">SPATIAL RELAY</a><span id="hub">CONNECTING</span></header><main>
-<p class="eyebrow">WEB-ONLY PHONE SENSOR</p><h1>Observe remotely.</h1><p class="intro">Use the rear camera to mark a target. Phone rotation streams from motion sensors. For this web MVP, set phone movement with the position pad.</p>
-<section class="camera"><video id="camera" autoplay playsinline muted></video><canvas id="reticle"></canvas><div id="cameraPrompt"><b>Camera is off</b><span>Start the rear camera, then tap the person/object to estimate its location.</span></div><span id="tapHint">TAP A TARGET</span></section>
-<section class="controls"><button id="cameraButton">Start rear camera</button><button id="detectButton" disabled>Enable person detection</button><button id="motionButton" disabled>Enable motion</button><button id="calibrateButton" disabled>Calibrate with laptop</button></section>
-<section class="panel"><div><small>ESTIMATED TARGET RANGE</small><output id="rangeOutput">3.0 m</output></div><input id="range" type="range" min="0.5" max="8" value="3" step="0.1"></section>
-<section class="panel"><div><small>PHONE POSITION IN WORLD</small><output id="position">+0.00 · +0.00 · +0.00</output></div><div class="pad"><button data-axis="z" data-step="-0.25">Forward</button><button data-axis="x" data-step="-0.25">Left</button><button data-axis="x" data-step="0.25">Right</button><button data-axis="z" data-step="0.25">Back</button><button class="reset" id="resetPosition">Reset position</button></div><p class="note">Browser sensors cannot measure reliable room-scale XYZ movement. Update this pad while testing each controlled movement.</p></section>
-<section class="panel"><div><small>PHONE ROTATION SINCE CALIBRATION</small><output id="orientation">0° yaw</output></div><p class="note">Motion data provides orientation only. It must be enabled from a button and works best over HTTPS.</p></section>
-<section class="flow">PHONE WEB PAGE <b>→</b> LAPTOP HUB <b>→</b> LAPTOP WEBCAM OVERLAY</section>
-</main><script src="/phone.js"></script></body></html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Spatial Relay | Phone Sensor</title>
+  <link rel="stylesheet" href="/phone.css">
+</head>
+<body>
+  <header>
+    <a href="/">SPATIAL RELAY</a>
+    <span id="hub" class="badge">CONNECTING</span>
+  </header>
+
+  <main>
+    <div class="header-desc">
+      <p class="eyebrow">MOBILE OBSERVER &bull; SHARED COORDINATES</p>
+      <h1>Phone Sensor</h1>
+      <p class="intro">Manually position this phone relative to the laptop observer camera at <code>(0,0,0)</code>. Point the camera at a person to place them in the shared room frame.</p>
+    </div>
+
+    <!-- Camera Viewport & Target Selection -->
+    <section class="camera-card">
+      <div class="camera">
+        <video id="camera" autoplay playsinline muted></video>
+        <canvas id="reticle"></canvas>
+        <div id="cameraPrompt">
+          <b>Camera is off</b>
+          <span>Start rear camera, then tap any target or enable MediaPipe person detection.</span>
+        </div>
+        <span id="tapHint">TAP TARGET TO LOCATE</span>
+      </div>
+      <div class="camera-actions">
+        <button id="cameraButton" class="btn primary">Start rear camera</button>
+        <button id="detectButton" class="btn secondary" disabled>Enable person detection</button>
+        <button id="motionButton" class="btn secondary" disabled>Enable compass / gyro</button>
+      </div>
+    </section>
+
+    <!-- Target Range Setting -->
+    <section class="panel">
+      <div class="panel-header">
+        <span class="label">ESTIMATED TARGET RANGE (IN FRONT)</span>
+        <output id="rangeOutput" class="val">1.0 m</output>
+      </div>
+      <input id="range" type="range" min="0.5" max="8" value="1.0" step="0.1">
+      <div class="range-marks">
+        <span>0.5m</span><span>1.0m</span><span>2.0m</span><span>3.0m</span><span>5.0m</span><span>8.0m</span>
+      </div>
+    </section>
+
+    <!-- Manual Phone Position in World Coordinates -->
+    <section class="panel highlight-panel">
+      <div class="panel-header">
+        <span class="label">MANUAL PHONE POSITION (METRES)</span>
+        <span class="sub-label">Laptop is origin (0, 0)</span>
+      </div>
+
+      <div class="coord-inputs">
+        <div class="input-group">
+          <label for="inputX">X (+Right / &minus;Left)</label>
+          <div class="input-stepper">
+            <button type="button" class="step-btn" data-input="inputX" data-delta="-0.5">&minus;</button>
+            <input id="inputX" type="number" step="0.25" value="1.00">
+            <button type="button" class="step-btn" data-input="inputX" data-delta="0.5">+</button>
+          </div>
+        </div>
+
+        <div class="input-group">
+          <label for="inputZ">Z (+Forward / &minus;Back)</label>
+          <div class="input-stepper">
+            <button type="button" class="step-btn" data-input="inputZ" data-delta="-0.5">&minus;</button>
+            <input id="inputZ" type="number" step="0.25" value="1.00">
+            <button type="button" class="step-btn" data-input="inputZ" data-delta="0.5">+</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="dpad">
+        <button class="dpad-btn up" data-axis="z" data-step="0.5">&uarr; Forward (+Z)</button>
+        <div class="dpad-row">
+          <button class="dpad-btn left" data-axis="x" data-step="-0.5">&larr; Left (&minus;X)</button>
+          <button class="dpad-btn reset" id="resetPosition">Reset (0,0)</button>
+          <button class="dpad-btn right" data-axis="x" data-step="0.5">Right (+X) &rarr;</button>
+        </div>
+        <button class="dpad-btn down" data-axis="z" data-step="-0.5">&darr; Backward (&minus;Z)</button>
+      </div>
+    </section>
+
+    <!-- Phone Rotation / Direction Controls -->
+    <section class="panel">
+      <div class="panel-header">
+        <span class="label">PHONE FACING DIRECTION (YAW)</span>
+        <output id="orientation" class="val">0&deg; (+Z Forward)</output>
+      </div>
+
+      <div class="yaw-controls">
+        <input id="yawSlider" type="range" min="-180" max="180" value="0" step="5">
+        <div class="preset-buttons">
+          <button class="preset-btn active" data-yaw="0">0&deg; (+Z Forward)</button>
+          <button class="preset-btn" data-yaw="90">+90&deg; (+X Right)</button>
+          <button class="preset-btn" data-yaw="180">180&deg; (&minus;Z Back)</button>
+          <button class="preset-btn" data-yaw="-90">&minus;90&deg; (&minus;X Left)</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Real-Time Shared Space Telemetry -->
+    <section class="panel telemetry-panel">
+      <div class="panel-header">
+        <span class="label">SHARED REAL-WORLD TELEMETRY</span>
+        <span class="live-indicator"><i class="dot"></i> LIVE</span>
+      </div>
+
+      <div class="telemetry-grid">
+        <div class="telemetry-box">
+          <span class="box-label">PHONE IN WORLD</span>
+          <b id="phoneWorldDisplay">X: +1.00 &bull; Z: +1.00</b>
+          <small id="phoneHeadingDisplay">Facing: 0&deg; (+Z)</small>
+        </div>
+        <div class="telemetry-box target-box">
+          <span class="box-label">TARGET IN WORLD</span>
+          <b id="targetWorldDisplay">X: +1.00 &bull; Z: +2.00</b>
+          <small id="targetStatusDisplay">In front of phone: 1.0m</small>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/phone.js"></script>
+</body>
+</html>
