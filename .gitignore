@@ -1,0 +1,15 @@
+__pycache__/
+.pytest_cache/
+.venv/
+.venv-offline/
+venv/
+env/
+*.pyc
+data/
+
+# Local development TLS certificates and private keys
+*.pem
+*.key
+*.pfx
+*.p12
+*.crt

@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#07111d" />
+    <title>Spatial Relay — AR Awareness</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="noise"></div>
+    <header class="topbar">
+      <a class="brand" href="#"><span class="brand-mark"><i></i><i></i><i></i></span><span>spatial<span>relay</span></span></a>
+      <nav><a class="active" href="#workspace">Workspace</a><a href="#guide">System guide</a><a href="#devices">Devices</a></nav>
+      <div class="connection"><span class="live-dot"></span><span id="connectionText">Phone connected</span><button class="avatar" aria-label="User profile">SK</button></div>
+    </header>
+
+    <main id="workspace">
+      <section class="hero">
+        <div><p class="eyebrow">LIVE SPATIAL SESSION <span></span> LAB 01</p><h1>See beyond<br/><em>the wall.</em></h1><p class="lede">A shared coordinate space that lets your laptop visualize what your phone sees — in real time.</p></div>
+        <div class="session-card"><div class="session-top"><span>SESSION STATUS</span><b><i></i> TRACKING</b></div><div class="session-id">SR-2048-A</div><div class="session-meta"><span>LATENCY <strong id="latency">18 ms</strong></span><span>UPTIME <strong id="uptime">00:02:14</strong></span></div></div>
+      </section>
+
+      <section class="workspace-grid">
+        <article class="camera-card panel">
+          <div class="panel-title"><div><p class="eyebrow">AR VIEWPORT</p><h2>Laptop perspective</h2></div><div class="camera-live"><i></i> LIVE</div></div>
+          <div class="viewport" id="arViewport">
+            <div class="grid-floor"></div><div class="room-edge edge-a"></div><div class="room-edge edge-b"></div><div class="room-edge edge-c"></div>
+            <div class="wall-label">OCCLUDED ZONE</div>
+            <div class="target-marker" id="targetMarker"><div class="marker-ring ring-one"></div><div class="marker-ring ring-two"></div><div class="human"><span class="head"></span><span class="body"></span><span class="arm arm-l"></span><span class="arm arm-r"></span><span class="leg leg-l"></span><span class="leg leg-r"></span></div><div class="marker-label"><b>PERSON_01</b><span id="targetDistance">4.2m · confidence 94%</span></div></div>
+            <div class="reticle"><i></i><i></i><i></i><i></i></div><div class="compass">N <span>NE</span> E</div><div class="view-note">CAM 01 / ORIGIN</div>
+          </div>
+          <div class="viewport-footer"><span><i class="orange-dot"></i> Object is outside direct line of sight</span><span id="worldCoords">WORLD [ +2.14, +0.00, −3.61 ]</span></div>
+        </article>
+
+        <aside class="side-stack">
+          <article class="panel pose-card"><div class="panel-title"><div><p class="eyebrow">PHONE POSE</p><h2>Sensor telemetry</h2></div><button class="tiny-button" id="pauseButton">Pause</button></div><div class="pose-visual"><div class="axis x"></div><div class="axis y"></div><div class="axis z"></div><div class="phone-shape" id="phoneShape"><i></i></div><span class="axis-label x-l">X</span><span class="axis-label y-l">Y</span><span class="axis-label z-l">Z</span></div><div class="metric-grid"><div><span>POSITION</span><b id="phonePos">+1.38 · +0.00 · −2.20</b></div><div><span>ORIENTATION</span><b id="phoneRot">0° · 32° · 0°</b></div></div></article>
+          <article class="panel target-card"><div class="panel-title"><div><p class="eyebrow">DETECTED TARGETS</p><h2>Scene objects <sup>01</sup></h2></div><span class="confidence">94%</span></div><div class="target-row"><div class="target-icon">◉</div><div><b>PERSON_01</b><span>Phone relative · <em id="relativePos">[0.8, 0.0, −2.5]</em></span></div><span class="signal"><i></i><i></i><i></i><i></i></span></div></article>
+        </aside>
+      </section>
+
+      <section class="bottom-grid" id="guide">
+        <article class="panel map-card"><div class="panel-title"><div><p class="eyebrow">SHARED SPACE</p><h2>Coordinate map</h2></div><span class="map-scale">1 GRID = 1M</span></div><div class="map" id="map"><div class="map-grid"></div><div class="origin-dot"><i></i><span>LAPTOP / 0,0,0</span></div><div class="phone-dot" id="phoneDot"><i></i><span>PHONE</span></div><div class="path"></div><div class="map-target" id="mapTarget"><i></i><span>PERSON_01</span></div><div class="map-north">N</div></div><div class="legend"><span><i class="legend-origin"></i> Origin</span><span><i class="legend-phone"></i> Phone</span><span><i class="legend-target"></i> Target estimate</span><span class="line-key"></span><span>Phone trajectory</span></div></article>
+        <article class="panel pipeline-card"><div class="panel-title"><div><p class="eyebrow">DATA PIPELINE</p><h2>Coordinate transform</h2></div><span class="calc-live">CALCULATING</span></div><div class="formula"><span class="formula-phone">T<sub>world←phone</sub></span><b>×</b><span class="formula-vector">P<sub>target, phone</sub></span><b>=</b><span class="formula-world">P<sub>target, world</sub></span></div><div class="pipeline-steps"><div><span>01</span><p><b>ARCore / ARKit pose</b><small>Position + rotation from phone</small></p></div><div><span>02</span><p><b>Depth-based target range</b><small>Target position in phone frame</small></p></div><div><span>03</span><p><b>World-space projection</b><small>Render marker in laptop view</small></p></div></div></article>
+      </section>
+    </main>
+    <footer id="devices"><span>SPATIAL RELAY / MVP CONSOLE</span><span>CALIBRATED <i></i> RELATIVE TRACKING ENABLED</span></footer>
+    <script src="app.js"></script>
+  </body>
+</html>

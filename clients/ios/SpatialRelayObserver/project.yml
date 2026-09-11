@@ -1,0 +1,19 @@
+name: SpatialRelayObserver
+options:
+  deploymentTarget:
+    iOS: "17.0"
+settings:
+  base:
+    PRODUCT_BUNDLE_IDENTIFIER: com.spatialrelay.observer
+    SWIFT_VERSION: "5.0"
+targets:
+  SpatialRelayObserver:
+    type: application
+    platform: iOS
+    sources:
+      - path: .
+        excludes: [README.md, project.yml, Info.plist]
+    settings:
+      base:
+        INFOPLIST_FILE: Info.plist
+        PRODUCT_NAME: SpatialRelay Observer

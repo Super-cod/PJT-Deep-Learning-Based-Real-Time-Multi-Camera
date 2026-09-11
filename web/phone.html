@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Spatial Relay | Phone Sensor</title><link rel="stylesheet" href="/phone.css"></head>
+<body><header><a href="/">SPATIAL RELAY</a><span id="hub">CONNECTING</span></header><main>
+<p class="eyebrow">WEB-ONLY PHONE SENSOR</p><h1>Observe remotely.</h1><p class="intro">Use the rear camera to mark a target. Phone rotation streams from motion sensors. For this web MVP, set phone movement with the position pad.</p>
+<section class="camera"><video id="camera" autoplay playsinline muted></video><canvas id="reticle"></canvas><div id="cameraPrompt"><b>Camera is off</b><span>Start the rear camera, then tap the person/object to estimate its location.</span></div><span id="tapHint">TAP A TARGET</span></section>
+<section class="controls"><button id="cameraButton">Start rear camera</button><button id="detectButton" disabled>Enable person detection</button><button id="motionButton" disabled>Enable motion</button><button id="calibrateButton" disabled>Calibrate with laptop</button></section>
+<section class="panel"><div><small>ESTIMATED TARGET RANGE</small><output id="rangeOutput">3.0 m</output></div><input id="range" type="range" min="0.5" max="8" value="3" step="0.1"></section>
+<section class="panel"><div><small>PHONE POSITION IN WORLD</small><output id="position">+0.00 · +0.00 · +0.00</output></div><div class="pad"><button data-axis="z" data-step="-0.25">Forward</button><button data-axis="x" data-step="-0.25">Left</button><button data-axis="x" data-step="0.25">Right</button><button data-axis="z" data-step="0.25">Back</button><button class="reset" id="resetPosition">Reset position</button></div><p class="note">Browser sensors cannot measure reliable room-scale XYZ movement. Update this pad while testing each controlled movement.</p></section>
+<section class="panel"><div><small>PHONE ROTATION SINCE CALIBRATION</small><output id="orientation">0° yaw</output></div><p class="note">Motion data provides orientation only. It must be enabled from a button and works best over HTTPS.</p></section>
+<section class="flow">PHONE WEB PAGE <b>→</b> LAPTOP HUB <b>→</b> LAPTOP WEBCAM OVERLAY</section>
+</main><script src="/phone.js"></script></body></html>
