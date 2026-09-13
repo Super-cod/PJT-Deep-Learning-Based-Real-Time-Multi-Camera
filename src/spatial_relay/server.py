@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 from contextlib import asynccontextmanager
-
+from .models import Pose
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles

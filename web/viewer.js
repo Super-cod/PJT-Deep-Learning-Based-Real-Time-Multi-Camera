@@ -424,8 +424,12 @@ function connect() {
         phoneState.x = p.phoneWorld.position[0];
         phoneState.z = p.phoneWorld.position[2];
         $('phonePose').textContent = `X: ${fmt(phoneState.x)} · Z: ${fmt(phoneState.z)}`;
-        $('lpPhoneX').value = phoneState.x.toFixed(2);
-        $('lpPhoneZ').value = phoneState.z.toFixed(2);
+        if (document.activeElement !== $('lpPhoneX')) {
+          $('lpPhoneX').value = phoneState.x.toFixed(2);
+        }
+        if (document.activeElement !== $('lpPhoneZ')) {
+          $('lpPhoneZ').value = phoneState.z.toFixed(2);
+        }
 
         // Extract yaw from quaternion if present
         const q = p.phoneWorld.quaternionXyzw;
@@ -479,12 +483,14 @@ document.querySelectorAll('.yaw-preset').forEach(btn => {
   };
 });
 
-$('lpPhoneX').oninput = e => {
-  setPhoneFromLaptop(parseFloat(e.target.value) || 0, phoneState.z);
+$('lpPhoneX').onchange = e => {
+  const x = parseFloat(e.target.value);
+  if (Number.isFinite(x)) setPhoneFromLaptop(x, phoneState.z);
 };
 
-$('lpPhoneZ').oninput = e => {
-  setPhoneFromLaptop(phoneState.x, parseFloat(e.target.value) || 0);
+$('lpPhoneZ').onchange = e => {
+  const z = parseFloat(e.target.value);
+  if (Number.isFinite(z)) setPhoneFromLaptop(phoneState.x, z);
 };
 
 // Preset Scenarios for testing
