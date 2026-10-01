@@ -1,0 +1,12 @@
+{
+  "name": "arkit-tracker",
+  "version": "1.0.0",
+  "description": "Native ARKit world/body tracking for Spatial Relay Observer",
+  "main": "index.ts",
+  "private": true,
+  "peerDependencies": {
+    "expo": "*",
+    "react": "*",
+    "react-native": "*"
+  }
+}

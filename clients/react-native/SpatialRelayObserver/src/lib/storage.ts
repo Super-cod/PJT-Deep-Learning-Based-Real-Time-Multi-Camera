@@ -12,8 +12,13 @@ export interface ServerSettings {
   useWss: boolean;
 }
 
-const DEFAULTS: ServerSettings = {
-  host: '172.20.167.11',
+/**
+ * Placeholder LAN address. It is intentionally not a real host: the phone's
+ * actual address is set once via the Settings modal and then persisted, so
+ * this value only controls what the preview shows before that first save.
+ */
+export const DEFAULT_SETTINGS: ServerSettings = {
+  host: '192.168.1.100',
   port: 8000,
   useWss: false,
 };
@@ -25,13 +30,14 @@ export async function loadSettings(): Promise<ServerSettings> {
       KEYS.SERVER_PORT,
       KEYS.USE_WSS,
     ]);
+    const parsedPort = port[1] ? parseInt(port[1], 10) : NaN;
     return {
-      host: host[1] ?? DEFAULTS.host,
-      port: port[1] ? parseInt(port[1], 10) : DEFAULTS.port,
+      host: host[1]?.trim() || DEFAULT_SETTINGS.host,
+      port: Number.isFinite(parsedPort) ? parsedPort : DEFAULT_SETTINGS.port,
       useWss: useWss[1] === 'true',
     };
   } catch {
-    return DEFAULTS;
+    return DEFAULT_SETTINGS;
   }
 }
 

@@ -6,10 +6,30 @@ const mapCanvas = $('floorMap'), mapCtx = mapCanvas.getContext('2d');
 let intrinsics = null;
 let target = null;
 let stream = null;
-let calibrated = true;
+// Calibration state and phone liveness come from the hub, never guessed here.
+let calibrated = false;
+let phoneSeen = false;
+let lastPhonePacketMs = 0;
+/** Packets stop if the phone drops off Wi-Fi without a clean socket close. */
+const PHONE_STALE_MS = 2000;
+// ARKit tracking state, reported by the hub on connect. 'none' means the phone
+// has not identified its pose source yet, so the HUD stays neutral.
+let poseSource = 'none';
+let phoneTracking = null;
+
+/** Short label for the pose source, or '' when it is not worth showing. */
+function poseSourceLabel() {
+  if (poseSource === 'arkit') return 'ARKit';
+  if (poseSource === 'sensors') return 'SENSORS';
+  return '';
+}
 
 const laptopState = { x: 0.0, y: 0.0, z: 0.0, yawDeg: 0 };
-const phoneState = { x: 1.0, y: 0.0, z: 1.0, yawDeg: 0 };
+const phoneState = { x: 0.0, y: 0.0, z: 0.0, yawDeg: 0 };
+
+function phoneIsLive() {
+  return phoneSeen && performance.now() - lastPhonePacketMs < PHONE_STALE_MS;
+}
 
 const socketURL = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/viewer`;
 let socket = null;
@@ -293,29 +313,46 @@ function renderFloorMap() {
   mapCtx.fillText('LAPTOP (0,0)', originX - 35, originY + 18);
 
   // Draw Phone Position and Heading
-  const [phoneCx, phoneCy] = toCanvas(phoneState.x, phoneState.z);
-  const phoneYawRad = (phoneState.yawDeg * Math.PI) / 180;
+  // Only draw a real phone marker once a live packet has arrived. Before that,
+  // showing a hardcoded position would look like a real tracked phone.
+  if (phoneIsLive()) {
+    const [phoneCx, phoneCy] = toCanvas(phoneState.x, phoneState.z);
+    const phoneYawRad = (phoneState.yawDeg * Math.PI) / 180;
 
-  // Phone Heading Arrow
-  const arrowLen = 24;
-  const headingAngle = (-Math.PI / 2) + phoneYawRad;
-  const arrowTipX = phoneCx + Math.cos(headingAngle) * arrowLen;
-  const arrowTipY = phoneCy + Math.sin(headingAngle) * arrowLen;
+    // Phone Heading Arrow
+    const arrowLen = 24;
+    const headingAngle = (-Math.PI / 2) + phoneYawRad;
+    const arrowTipX = phoneCx + Math.cos(headingAngle) * arrowLen;
+    const arrowTipY = phoneCy + Math.sin(headingAngle) * arrowLen;
 
-  mapCtx.strokeStyle = '#ff8452';
-  mapCtx.lineWidth = 2.5;
-  mapCtx.beginPath();
-  mapCtx.moveTo(phoneCx, phoneCy);
-  mapCtx.lineTo(arrowTipX, arrowTipY);
-  mapCtx.stroke();
+    mapCtx.strokeStyle = calibrated ? '#ff8452' : '#8a8f98';
+    mapCtx.lineWidth = 2.5;
+    mapCtx.beginPath();
+    mapCtx.moveTo(phoneCx, phoneCy);
+    mapCtx.lineTo(arrowTipX, arrowTipY);
+    mapCtx.stroke();
 
-  // Phone Marker Dot
-  mapCtx.fillStyle = '#ff8452';
-  mapCtx.beginPath();
-  mapCtx.arc(phoneCx, phoneCy, 5, 0, Math.PI * 2);
-  mapCtx.fill();
-  mapCtx.font = '700 10px DM Mono';
-  mapCtx.fillText('PHONE', phoneCx + 8, phoneCy - 4);
+    // Phone Marker Dot
+    mapCtx.fillStyle = calibrated ? '#ff8452' : '#8a8f98';
+    mapCtx.beginPath();
+    mapCtx.arc(phoneCx, phoneCy, 5, 0, Math.PI * 2);
+    mapCtx.fill();
+    mapCtx.font = '700 10px DM Mono';
+    mapCtx.fillText('PHONE', phoneCx + 8, phoneCy - 4);
+
+    // Uncalibrated phones cannot localise a person, so say so on the map.
+    if (!calibrated) {
+      mapCtx.fillStyle = '#c8ccd4';
+      mapCtx.font = '700 10px DM Mono';
+      mapCtx.fillText('UNCALIBRATED', phoneCx - 46, phoneCy + 16);
+    }
+  } else {
+    // Explicitly absent: waiting for the phone, not silently at the origin.
+    const [wCx, wCy] = toCanvas(0, 0);
+    mapCtx.fillStyle = '#6b7280';
+    mapCtx.font = '700 10px DM Mono';
+    mapCtx.fillText('WAITING FOR PHONE', wCx - 50, wCy + 30);
+  }
 
   // Draw Target / Person
   if (target && target.positionWorld) {
@@ -440,20 +477,43 @@ function connect() {
     const p = JSON.parse(e.data);
 
     if (p.type === 'debug_pose') {
+      phoneSeen = true;
+      lastPhonePacketMs = performance.now();
+      if (typeof p.calibrated === 'boolean') calibrated = p.calibrated;
       updatePhonePoseFromWorld(p.phoneWorld);
       renderFloorMap();
     }
 
     if (p.type === 'target') {
       target = p;
+      phoneSeen = true;
+      lastPhonePacketMs = performance.now();
+      if (typeof p.calibrated === 'boolean') calibrated = p.calibrated;
       updatePhonePoseFromWorld(p.phoneWorld);
+      renderFloorMap();
+    }
+
+    if (p.type === 'phone_status') {
+      // Hub-side snapshot on connect. Surface the ARKit tracking state so a
+      // degraded or mis-sourced phone is visible rather than looking frozen.
+      if (typeof p.calibrated === 'boolean') calibrated = p.calibrated;
+      if (p.poseSource) poseSource = p.poseSource;
+      phoneTracking = p.tracking || null;
+      renderFloorMap();
+    }
+
+    // The hub sends the current state on connect; use it immediately.
+    if (typeof p.calibrated === 'boolean' && p.type !== 'debug_pose' && p.type !== 'target') {
+      calibrated = p.calibrated;
       renderFloorMap();
     }
   };
 
   socket.onclose = () => {
+    phoneSeen = false;
     $('connection').innerHTML = '<span class="dot"></span> RECONNECTING';
     $('connection').classList.remove('live');
+    renderFloorMap();
     setTimeout(connect, 2000);
   };
 }
@@ -509,3 +569,23 @@ connect();
 drawOverlay();
 renderFloorMap();
 setInterval(renderFloorMap, 200);
+
+// Keep the numeric readout honest: a frozen value must not look live.
+setInterval(() => {
+  if (phoneIsLive()) {
+    const source = poseSourceLabel();
+    const tracking = phoneTracking && phoneTracking.status && phoneTracking.status !== 'normal'
+      ? ` · ${String(phoneTracking.status).toUpperCase()}` +
+        (phoneTracking.limitedReason ? ` (${phoneTracking.limitedReason})` : '')
+      : '';
+    $('phonePose').textContent =
+      `X: ${fmt(phoneState.x)} · Z: ${fmt(phoneState.z)}` +
+      (calibrated ? '' : ' · UNCALIBRATED') +
+      (source ? ` · ${source}` : '') +
+      tracking;
+  } else {
+    $('phonePose').textContent = phoneSeen
+      ? 'PHONE OFFLINE'
+      : 'WAITING FOR PHONE';
+  }
+}, 250);

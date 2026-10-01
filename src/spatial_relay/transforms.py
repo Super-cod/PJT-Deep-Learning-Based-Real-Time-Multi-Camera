@@ -180,7 +180,61 @@ class Transform:
         return Pose(self.matrix[:3, 3], rotation_to_quaternion(self.matrix[:3, :3]))
 
 
-def arkit_to_world(position: np.ndarray, quaternion_xyzw: np.ndarray) -> Transform:
-    """Explicit converter hook. ARKit data must first be aligned to marker/world."""
-    return Transform.from_pose(Pose(position, quaternion_xyzw))
+# ── ARKit integration ──────────────────────────────────────────────────────────
+#
+# ARKit reports the phone camera's pose in its own world frame: gravity-aligned
+# right-handed, `+Y` up, metres. That frame's *origin* is wherever the phone was
+# when the session started, so it must be anchored to the shared world W using
+# the calibration pose recorded at that moment.
+#
+# The relationship the hub needs is:
+#
+#     T_W_arkitCamera = T_W_arkitAtCalib * inverse(T_arkitAtCalib_arkitCamera_now)
+#
+# i.e. every live ARKit pose is expressed as a delta from the calibration pose.
+# `SharedFrameCalibration.world_from_phone` already does exactly this for the
+# phone device, so the module only has to build ARKit poses into `Transform`s.
+
+# Rotation from the ARKit camera frame to the phone-local camera convention the
+# rest of the hub assumes (`+X` right, `+Y` up, `+Z` forward, away from the
+# viewer). ARKit's camera looks down its own `-Z`, so a 180° rotation about `+X`
+# maps `+Z` onto the forward direction and flips `+Y` down, which the OpenCV-style
+# detection path then re-flips via `localization`'s image convention.
+ARKIT_CAMERA_TO_FORWARD = np.array([1.0, 0.0, 0.0, 0.0], dtype=float)
+
+
+def arkit_pose_to_transform(
+    position: np.ndarray,
+    quaternion_xyzw: np.ndarray,
+    camera_to_forward: np.ndarray = ARKIT_CAMERA_TO_FORWARD,
+) -> Transform:
+    """Build a camera-to-world `Transform` from an ARKit camera pose.
+
+    ARKit hands us the camera-to-world transform directly, so no axis swap is
+    needed for *pose*. `camera_to_forward` is available for callers that need to
+    convert a camera-space direction (for example a raycast normal) into the
+    hub's forward-is-`+Z` convention.
+    """
+    return Transform.from_rt(
+        quaternion_to_rotation(quaternion_xyzw),
+        np.asarray(position, dtype=float).reshape(3),
+    )
+
+
+def rotate_vector(q_xyzw: np.ndarray, v: np.ndarray) -> np.ndarray:
+    """Rotate vector `v` by quaternion `q` (x, y, z, w)."""
+    q = quaternion_normalize(q_xyzw)
+    v = np.asarray(v, dtype=float).reshape(3)
+    u, s = q[:3], q[3]
+    return v + 2.0 * np.cross(u, np.cross(u, v) + s * v)
+
+
+def arkit_direction_to_forward(direction: np.ndarray) -> np.ndarray:
+    """Rotate an ARKit camera-space direction into the hub's forward-is-`+Z` frame.
+
+    ARKit's camera looks down its own `-Z`; the hub expects camera space with
+    `+Z` pointing forward, away from the viewer, so a 180° turn about `+X` is
+    applied. Use this for raycast directions and hit normals, not for poses.
+    """
+    return rotate_vector(ARKIT_CAMERA_TO_FORWARD, direction)
 

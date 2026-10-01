@@ -36,8 +36,8 @@ Processing hub and demonstrator for **deep-learning-based real-time multi-camera
 | Module | Description | Implementation |
 |---|---|---|
 | **M1 Acquisition Contract** | Timestamped RGB, 3D metric joints, and 6-DoF pose schema | `src/spatial_relay/models.py`, `protocol.ts` |
-| **M2 Deep Pose Estimation** | Real-time on-device human landmark detection (MediaPipe Vision) | `cameraWebView.ts`, `rn-mediapipe.js` |
-| **M3 3D Metric Localization** | Pinhole back-projection with adjustable range and patch depth | `src/spatial_relay/geometry.py`, `geometry.ts` |
+| **M2 Deep Pose Estimation** | Real-time on-device human landmark detection (MediaPipe Vision) | `cameraWebView.ts`, `web/phone.js` |
+| **M3 3D Metric Localization** | Pinhole back-projection with adjustable range and patch depth | `src/spatial_relay/localization.py`, `geometry.ts` |
 | **M4 Shared Frame Calibration**| Rigid coordinate transforms mapping phone and laptop into world $W$ | `src/spatial_relay/calibration.py` |
 | **M5 Real-Time Relay** | FastAPI WebSocket server broadcasting at 25 FPS | `src/spatial_relay/server.py` |
 | **M6 AR Projection** | Laptop camera frustum gating, reticle projection, and floor map | `web/viewer.js`, `web/index.html` |
@@ -52,12 +52,23 @@ Processing hub and demonstrator for **deep-learning-based real-time multi-camera
 ```bash
 # From the repository root:
 python3 -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+source .venv/bin/activate          # macOS / Linux
+# .venv\Scripts\activate            # Windows PowerShell / cmd
+
 pip install -r requirements.txt
 pip install -e .
+```
 
-# Run the hub server on your LAN:
+Then start the hub. `PYTHONPATH=src` is Bash syntax; use the Windows form below instead.
+
+```bash
+# macOS / Linux
 PYTHONPATH=src python3 -m uvicorn spatial_relay.server:app --host 0.0.0.0 --port 8000 --reload
+```
+
+```powershell
+# Windows PowerShell, from the repository root
+.\.venv\Scripts\python.exe -m uvicorn spatial_relay.server:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 The hub is now active on port `8000`. You can verify health at `http://localhost:8000/health`.
@@ -79,7 +90,7 @@ npx expo start --lan
 * Open the **Expo Go** app on your iPhone (iOS 17+ / SDK 57 compatible).
 * Scan the QR code displayed in the terminal.
 * Grant **Camera** and **Motion & Orientation** permissions when prompted.
-* In the app settings (gear icon), set the **Hub Host** to your laptop's Wi-Fi IP (e.g. `172.20.10.2`) and port `8000`.
+* Tap the **gear icon** to open Settings, then enter your laptop's Wi-Fi IP (for example `192.168.1.42`) and port `8000`. The app ships with a placeholder host, so this is required on first launch.
 
 ---
 
@@ -100,7 +111,10 @@ http://localhost:8000
 
 ## Calibration & Coordinate Synchronization
 
-Both devices start aligned in the shared room coordinate system:
+The laptop camera defines the world origin, so it needs no setup. The phone
+starts **uncalibrated** and `/health` reports `"calibrated": false` until it
+reports a position.
+
 1. Hold the phone right beside the laptop's webcam, facing forward into the room in the same direction as the laptop screen.
 2. Tap **Calibrate** on the phone (or click **Reset origin (0,0)** on the laptop console).
 3. Both devices will synchronize to:
@@ -125,7 +139,8 @@ Both devices start aligned in the shared room coordinate system:
 │   │       │   ├── hooks/          # useDeviceMotion (PDR + Gyro), useWebSocket
 │   │       │   ├── lib/            # cameraWebView, geometry, protocol, storage
 │   │       │   ├── screens/        # ObserverScreen main view
-│   │       │   └── components/     # StatusHeader, DPad, RangeSlider
+│   │       │   ├── components/     # StatusHeader, DPad, RangeSlider
+│   │       │   └── modals/         # SettingsModal (hub host / port)
 │   │       └── package.json
 │   ├── ios/                        # Native Swift ARKit / Vision observer (Xcode)
 │   └── unity/                      # Unity ARCore receiver client
@@ -133,15 +148,24 @@ Both devices start aligned in the shared room coordinate system:
 │   └── spatial_relay/              # Python processing hub
 │       ├── server.py               # FastAPI WebSocket server & packet relay
 │       ├── calibration.py          # Shared coordinate transforms
-│       ├── geometry.py             # 3D back-projection & ray intersection
+│       ├── transforms.py           # Rigid transforms, quaternion/yaw math
+│       ├── localization.py         # 3D back-projection & landmark conversion
 │       ├── camera_calibration.py   # OpenCV checkerboard camera calibrator
-│       └── models.py               # Pydantic data schemas
+│       ├── frames.py               # Per-device frame state
+│       ├── filtering.py            # Measurement filters
+│       ├── drift.py                # Drift estimation
+│       ├── anchors.py              # Anchor helpers
+│       ├── protocol.py             # Packet (de)serialisation
+│       ├── models.py               # Pydantic data schemas
+│       └── simulator.py            # Scripted observer for flow testing
 ├── web/                            # Laptop AR Console (HTML/CSS/JS)
 │   ├── index.html                  # Main AR console dashboard
-│   ├── viewer.js                   # WebGL/Canvas AR overlay & 2D map renderer
+│   ├── viewer.js                   # Canvas AR overlay & 2D map renderer
 │   ├── viewer.css                  # Dark-mode telemetry styling
-│   └── rn-mediapipe.js             # MediaPipe vision module
-└── tests/                          # Automated coordinate & depth unit tests
+│   ├── phone.html                  # Browser-based phone observer page
+│   ├── phone.js                    # Browser MediaPipe observer
+│   └── phone.css
+└── tests/                          # Automated coordinate, depth & calibration tests
 ```
 
 ---
@@ -151,5 +175,9 @@ Both devices start aligned in the shared room coordinate system:
 For pixel-perfect webcam projection, calibrate your laptop camera using an OpenCV checkerboard:
 ```bash
 python3 -m spatial_relay.camera_calibration
+```
+```powershell
+# Windows PowerShell
+.\.venv\Scripts\python.exe -m spatial_relay.camera_calibration
 ```
 This saves focal length and distortion parameters to `data/laptop_camera.json`, which the web viewer loads automatically.

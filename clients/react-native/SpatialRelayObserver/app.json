@@ -11,8 +11,8 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.spatialrelay.observer",
       "infoPlist": {
-        "NSCameraUsageDescription": "Spatial Relay uses the rear camera to detect and localize a person using MediaPipe pose estimation.",
-        "NSMotionUsageDescription": "Spatial Relay reads the gyroscope and accelerometer to track your phone orientation in 3D space.",
+        "NSCameraUsageDescription": "Spatial Relay uses the rear camera with ARKit to track its position in 3D space and localize a person.",
+        "NSMotionUsageDescription": "Spatial Relay reads device motion to improve ARKit tracking quality.",
         "NSLocationWhenInUseUsageDescription": "Spatial Relay can use GPS as an optional outdoor world anchor.",
         "NSLocalNetworkUsageDescription": "Spatial Relay sends pose data to the Python hub on the local network.",
         "NSAppTransportSecurity": {
@@ -39,21 +39,15 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Spatial Relay uses the rear camera for person detection."
+          "cameraPermission": "Spatial Relay uses the rear camera with ARKit to track phone position and localize a person."
         }
       ],
-      "expo-sensors",
       [
         "expo-location",
         {
           "locationAlwaysAndWhenInUsePermission": "Spatial Relay uses GPS as an optional world anchor."
         }
       ]
-    ],
-    "extra": {
-      "eas": {
-        "projectId": "replace-with-your-eas-project-id"
-      }
-    }
+    ]
   }
 }

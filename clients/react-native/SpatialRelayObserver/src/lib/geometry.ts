@@ -1,15 +1,22 @@
 // ─── Geometry helpers matching the Python hub's coordinate conventions ────────
 //
-// Phone-camera frame: +X right, +Y up, +Z towards viewer (OpenCV → ARKit canon)
-// World frame: right-handed, +Y up, origin at laptop camera at calibration time.
-// T_world_from_phone maps phone-local points into world coordinates.
+// World frame: right-handed, +Y up, origin at the laptop camera at calibration.
+//
+// ARKit reports the phone camera pose in its own gravity-aligned world frame
+// (metres, +Y up). The pose is already a camera-to-world transform, so it is
+// forwarded to the hub unchanged; the hub anchors that frame with the
+// calibration pose. Nothing on the phone converts ARKit axes.
+//
+// Phone-camera frame (used only by the MediaPipe fallback, which has no metric
+// tracking): +X right, +Y up, +Z towards the viewer.
 
 /**
  * Back-project a normalised screen point (0–1 range) at depth `d` metres
  * into the phone-local camera frame.
- * Assumes a 60° horizontal FOV when real intrinsics are unavailable.
  *
- * Returns [x_right, y_up, z_forward] — matches the server's convention.
+ * Only the MediaPipe fallback path needs this: it has no depth sensor, so
+ * `depth` comes from a user guess. ARKit replaces it with a real raycast, so
+ * production code never calls this.
  */
 export function toPhonePoint(
   normX: number,
@@ -49,10 +56,13 @@ export function localToWorld(
 /**
  * Extract the yaw angle (rotation around +Y axis) from a quaternion [x, y, z, w].
  * Returns radians in the range -π to +π.
+ *
+ * Identical to `quaternion_to_yaw` in `src/spatial_relay/transforms.py`, so a
+ * yaw shown here matches what the hub computes for the same pose.
  */
 export function quaternionToYaw(q: [number, number, number, number]): number {
   const [x, y, z, w] = q;
-  return Math.atan2(2 * (w * y + x * z), 1 - 2 * (y * y + z * z));
+  return Math.atan2(2 * (x * z + y * w), 1 - 2 * (x * x + y * y));
 }
 
 /**
