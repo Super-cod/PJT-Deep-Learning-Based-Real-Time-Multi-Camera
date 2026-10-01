@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-import cv2
 import numpy as np
 
 from .models import CameraIntrinsics
@@ -23,6 +22,7 @@ def load_intrinsics(path: Path = DEFAULT_PATH) -> dict | None:
 
 def calibrate_webcam(camera_index: int = 0, board: tuple[int, int] = (9, 6), required_frames: int = 20) -> None:
     """Interactive calibration. Press space to accept a detected board, q to quit."""
+    import cv2
     cap = cv2.VideoCapture(camera_index)
     if not cap.isOpened(): raise RuntimeError("Cannot open laptop webcam")
     obj = np.zeros((board[0] * board[1], 3), np.float32); obj[:, :2] = np.mgrid[0:board[0], 0:board[1]].T.reshape(-1, 2)

@@ -416,39 +416,37 @@ function connect() {
     updateLaptopYaw(laptopState.yawDeg);
   };
 
+  function updatePhonePoseFromWorld(phoneWorld) {
+    if (!phoneWorld || !phoneWorld.position) return;
+    phoneState.x = phoneWorld.position[0];
+    phoneState.z = phoneWorld.position[2];
+    $('phonePose').textContent = `X: ${fmt(phoneState.x)} · Z: ${fmt(phoneState.z)}`;
+    if (document.activeElement !== $('lpPhoneX')) {
+      $('lpPhoneX').value = phoneState.x.toFixed(2);
+    }
+    if (document.activeElement !== $('lpPhoneZ')) {
+      $('lpPhoneZ').value = phoneState.z.toFixed(2);
+    }
+
+    const q = phoneWorld.quaternionXyzw;
+    if (q) {
+      const yaw = Math.atan2(2 * (q[0] * q[2] + q[1] * q[3]), 1 - 2 * (q[0] * q[0] + q[1] * q[1]));
+      phoneState.yawDeg = Math.round((yaw * 180) / Math.PI);
+      $('phoneHeadingText').textContent = `Heading: ${phoneState.yawDeg}°`;
+    }
+  }
+
   socket.onmessage = e => {
     const p = JSON.parse(e.data);
 
     if (p.type === 'debug_pose') {
-      if (p.phoneWorld) {
-        phoneState.x = p.phoneWorld.position[0];
-        phoneState.z = p.phoneWorld.position[2];
-        $('phonePose').textContent = `X: ${fmt(phoneState.x)} · Z: ${fmt(phoneState.z)}`;
-        if (document.activeElement !== $('lpPhoneX')) {
-          $('lpPhoneX').value = phoneState.x.toFixed(2);
-        }
-        if (document.activeElement !== $('lpPhoneZ')) {
-          $('lpPhoneZ').value = phoneState.z.toFixed(2);
-        }
-
-        // Extract yaw from quaternion if present
-        const q = p.phoneWorld.quaternionXyzw;
-        if (q) {
-          const yaw = Math.atan2(2 * (q[0] * q[2] + q[1] * q[3]), 1 - 2 * (q[0] * q[0] + q[1] * q[1]));
-          phoneState.yawDeg = Math.round((yaw * 180) / Math.PI);
-          $('phoneHeadingText').textContent = `Heading: ${phoneState.yawDeg}°`;
-        }
-      }
+      updatePhonePoseFromWorld(p.phoneWorld);
       renderFloorMap();
     }
 
     if (p.type === 'target') {
       target = p;
-      if (p.phoneWorld) {
-        phoneState.x = p.phoneWorld.position[0];
-        phoneState.z = p.phoneWorld.position[2];
-        $('phonePose').textContent = `X: ${fmt(phoneState.x)} · Z: ${fmt(phoneState.z)}`;
-      }
+      updatePhonePoseFromWorld(p.phoneWorld);
       renderFloorMap();
     }
   };
@@ -467,6 +465,7 @@ $('calibrate').onclick = () => {
   laptopState.y = 0;
   laptopState.z = 0;
   updateLaptopYaw(0);
+  setPhoneFromLaptop(0.0, 0.0);
 };
 
 $('laptopYawSlider').oninput = e => {

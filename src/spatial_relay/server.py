@@ -38,10 +38,16 @@ class RelayHub:
         pose = pose_from_packet(local_pose)
         if device == Device.PHONE:
             self.calibration.calibrate_phone(pose, transform_from_packet(start_offset))
+            from .transforms import quaternion_to_yaw
+            yaw = quaternion_to_yaw(pose.quaternion_xyzw)
+            self.calibration.set_manual_phone(pose.position, yaw)
             self.phone_local_pose = pose
         else:
             self.calibration.calibrate_laptop(pose); self.laptop_local_pose = pose
         await self.broadcast({"type":"calibration", "ready":self.calibration.ready, "world":"laptop camera at calibration", "device":device.value})
+        phone = self.calibration.world_from_phone(self.phone_local_pose)
+        laptop = self.calibration.world_from_laptop(self.laptop_local_pose)
+        await self.broadcast({"type":"debug_pose", "phoneWorld":pose_json(phone), "laptopWorld":pose_json(laptop), "calibrated":True})
 
     async def set_manual_pose(self, device: Device, position: list[float], yaw_rad: float) -> None:
         if device == Device.PHONE:
