@@ -18,8 +18,12 @@ import urllib.request
 
 import numpy as np
 
+from .transforms import rotation_to_quaternion
+
 JOINT_OFFSETS = {
-    "nose": (0.0, 1.62, 0.0),
+    "nose": (0.0, 1.62, 0.08), "neck": (0.0, 1.47, 0.0), "root": (0.0, 0.95, 0.0),
+    "left_eye": (0.035, 1.66, 0.06), "right_eye": (-0.035, 1.66, 0.06),
+    "left_ear": (0.075, 1.63, -0.02), "right_ear": (-0.075, 1.63, -0.02),
     "left_shoulder": (0.2, 1.42, 0.0), "right_shoulder": (-0.2, 1.42, 0.0),
     "left_elbow": (0.28, 1.15, 0.0), "right_elbow": (-0.28, 1.15, 0.0),
     "left_wrist": (0.3, 0.9, 0.05), "right_wrist": (-0.3, 0.9, 0.05),
@@ -70,16 +74,20 @@ def synthetic_room() -> dict:
 
 
 def look_at_quaternion(eye: np.ndarray, target: np.ndarray) -> list[float]:
-    """Quaternion of a camera at `eye` looking at `target` down its local −Z (ARKit / three.js)."""
+    """ARKit camera quaternion for a portrait-held phone at `eye` looking at `target`.
+
+    ARKit's camera frame is the landscape sensor frame (looks down −Z, local +X
+    points to the bottom of a portrait phone), so an upright view is rolled −90°.
+    """
     f = target - eye
     f /= np.linalg.norm(f)
     z = -f
     x = np.cross([0.0, 1.0, 0.0], z)
     x /= np.linalg.norm(x)
     y = np.cross(z, x)
-    r = np.column_stack([x, y, z])
-    w = math.sqrt(max(0.0, 1 + r[0, 0] + r[1, 1] + r[2, 2])) / 2
-    return [(r[2, 1] - r[1, 2]) / (4 * w), (r[0, 2] - r[2, 0]) / (4 * w), (r[1, 0] - r[0, 1]) / (4 * w), w]
+    upright = np.column_stack([x, y, z])
+    r = upright @ np.array([[0.0, 1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
+    return rotation_to_quaternion(r).tolist()
 
 
 def person_packet(x: float, z: float) -> dict:

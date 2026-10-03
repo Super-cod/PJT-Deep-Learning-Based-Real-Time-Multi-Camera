@@ -131,19 +131,7 @@ struct ContentView: View {
                 .tint(.cyan)
             }
         }
-        if observer.mode == .calibratedRoom {
-            Button {
-                observer.calibrate()
-            } label: {
-                Text(observer.calibrated ? "✓ Calibrated — tap to recalibrate" : "Calibrate (beside laptop webcam)")
-                    .font(.callout.bold())
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(observer.calibrated ? .gray : lime)
-            .foregroundStyle(.black)
-        } else {
+        if observer.mode != .calibratedRoom {
             HStack {
                 Text(observer.mode == .sharedMap ? "● SHARED MAP" : "◌ RELOCALIZING…")
                     .font(.caption.monospaced().bold())
@@ -153,6 +141,9 @@ struct ContentView: View {
                     .toggleStyle(.button)
                     .font(.caption)
                     .tint(lime)
+                Button("Leave map", role: .destructive) { observer.leaveSharedMap() }
+                    .buttonStyle(.bordered)
+                    .font(.caption)
             }
             if observer.mode == .sharedMap && !observer.remoteText.isEmpty {
                 Text(observer.remoteText)
@@ -160,6 +151,22 @@ struct ContentView: View {
                     .foregroundStyle(observer.remoteText.contains("behind") ? .orange : lime)
             }
         }
+        Button {
+            observer.calibrate()
+        } label: {
+            Text(calibrateTitle)
+                .font(.callout.bold())
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(observer.mode != .calibratedRoom ? .gray : (observer.calibrated ? .gray : lime))
+        .foregroundStyle(.black)
+    }
+
+    private var calibrateTitle: String {
+        if observer.mode != .calibratedRoom { return "Leave map & calibrate here" }
+        return observer.calibrated ? "✓ Calibrated — tap to recalibrate" : "Calibrate (beside laptop webcam)"
     }
 
     @ViewBuilder
@@ -281,7 +288,9 @@ struct SkeletonOverlay: View {
     let skeletons: [[OverlayJoint]]
 
     private static let links: [(String, String)] = [
-        ("nose", "left_shoulder"), ("nose", "right_shoulder"),
+        ("left_ear", "left_eye"), ("left_eye", "nose"), ("nose", "right_eye"), ("right_eye", "right_ear"),
+        ("nose", "neck"), ("neck", "left_shoulder"), ("neck", "right_shoulder"), ("neck", "root"),
+        ("root", "left_hip"), ("root", "right_hip"),
         ("left_shoulder", "right_shoulder"),
         ("left_shoulder", "left_elbow"), ("left_elbow", "left_wrist"),
         ("right_shoulder", "right_elbow"), ("right_elbow", "right_wrist"),

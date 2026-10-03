@@ -3,149 +3,62 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Spatial Relay | Laptop AR Viewer</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/viewer.css">
+  <title>Spatial Relay | World View</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/world.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "/vendor/three/three.module.js",
+        "three/addons/": "/vendor/three/addons/"
+      }
+    }
+  </script>
 </head>
 <body>
-  <div class="glow-bg"></div>
+  <div id="scene"></div>
 
-  <header class="topbar">
-    <div class="brand">
-      <span class="brand-glyph"><i></i></span>
-      <span class="brand-title">SPATIAL RELAY <span class="badge-sub">AR CONSOLE</span></span>
-    </div>
-    <a href="/world.html" class="world-link">3D World View →</a>
-    <div class="header-status">
-      <div id="phoneConnection" class="status-pill"><span class="dot"></span> PHONE OFFLINE</div>
-      <div id="connection" class="status-pill"><span class="dot"></span> CONNECTING TO HUB</div>
-    </div>
+  <header class="bar">
+    <div class="brand">SPATIAL RELAY <span>WORLD VIEW</span></div>
+    <div id="hubStatus" class="pill">CONNECTING</div>
   </header>
 
-  <main>
-    <section class="intro-bar">
-      <div>
-        <span class="eyebrow">FIXED REFERENCE &bull; SHARED COORDINATES</span>
-        <h1>Laptop AR Observer</h1>
-        <p class="lede">Laptop camera fixed at origin <code>(0,0,0)</code>. Visualizes detected persons in shared 3D space with viewing frustum gating.</p>
+  <aside class="panel">
+    <section>
+      <h2>View</h2>
+      <div class="row" id="viewButtons">
+        <button data-view="orbit" class="active">Orbit</button>
+        <button data-view="top">Top-down</button>
       </div>
-      <div class="actions">
-        <button id="startCamera" class="btn primary">Start laptop camera</button>
-        <button id="calibrate" class="btn secondary">Reset origin (0,0)</button>
-      </div>
+      <div class="row" id="followButtons"></div>
+      <label class="slider">Wall opacity
+        <input id="wallOpacity" type="range" min="0.05" max="0.9" step="0.05" value="0.22">
+      </label>
+      <label class="check"><input id="showObjects" type="checkbox" checked> Furniture</label>
+      <label class="check"><input id="showSight" type="checkbox" checked> Sight lines</label>
     </section>
 
-    <!-- Main Workspace: AR Viewport & Shared 2D Map -->
-    <div class="workspace-grid">
-      <!-- Left: AR Camera Viewport -->
-      <section class="stage-card">
-        <div class="card-header">
-          <span class="card-title">AR WEBCAM VIEWPORT</span>
-          <span id="targetStatusBadge" class="badge-state state-awaiting">AWAITING TARGET</span>
-        </div>
-        <div class="stage">
-          <video id="video" autoplay playsinline muted></video>
-          <canvas id="overlay"></canvas>
-          <div id="empty" class="empty">
-            <div class="empty-icon">&#9964;</div>
-            <strong>Camera off</strong>
-            <small>Start laptop camera to visualize augmented human overlays in real time.</small>
-          </div>
-          <div class="hud tl">CAM_01 / LAPTOP ORIGIN (0,0,0)</div>
-          <div id="targetReadout" class="hud br">AWAITING PHONE TARGET</div>
-        </div>
+    <section>
+      <h2>Phones <span id="deviceCount" class="count">0</span></h2>
+      <ul id="devices" class="list"><li class="empty">No phones connected</li></ul>
+    </section>
 
-        <!-- Observer Camera Rotation Controls -->
-        <div class="camera-controls">
-          <div class="ctrl-header">
-            <span class="label">LAPTOP CAMERA HEADING (YAW)</span>
-            <span id="laptopYawVal" class="val">0&deg; (Facing +Z Forward)</span>
-          </div>
-          <div class="slider-row">
-            <input id="laptopYawSlider" type="range" min="-90" max="90" value="0" step="1">
-            <button id="resetLaptopYaw" class="tiny-btn">Center 0&deg;</button>
-          </div>
-          <div class="quick-yaw">
-            <button class="yaw-preset" data-yaw="-45">&minus;45&deg; (Turn Left)</button>
-            <button class="yaw-preset active" data-yaw="0">0&deg; (Forward)</button>
-            <button class="yaw-preset" data-yaw="45">+45&deg; (Turn Right)</button>
-          </div>
-        </div>
-      </section>
+    <section>
+      <h2>People <span id="peopleCount" class="count">0</span></h2>
+      <ul id="people" class="list"><li class="empty">Nobody detected</li></ul>
+    </section>
 
-      <!-- Right: Interactive 2D Floor Map & Phone Telemetry -->
-      <aside class="sidebar-stack">
-        <!-- 2D Spatial Floor Map -->
-        <section class="panel map-panel">
-          <div class="card-header">
-            <span class="card-title">TOP-DOWN SHARED ROOM MAP</span>
-            <span class="scale-info">1 GRID = 1 METRE</span>
-          </div>
-          <div class="map-container">
-            <canvas id="floorMap" width="400" height="340"></canvas>
-            <div class="map-legend">
-              <span><i class="legend-laptop"></i> Laptop (0,0)</span>
-              <span><i class="legend-phone"></i> Phone</span>
-              <span><i class="legend-target"></i> Target</span>
-            </div>
-          </div>
-        </section>
+    <section>
+      <h2>Room model</h2>
+      <p id="roomInfo" class="muted">No room scanned yet. On a LiDAR iPhone tap <b>Scan rooms</b>, then <b>Save &amp; share</b>.</p>
+    </section>
 
-        <!-- Live Metrics Grid -->
-        <section class="panel telemetry-panel">
-          <div class="card-header">
-            <span class="card-title">COORDINATE TELEMETRY</span>
-            <span class="sub-label">Real-time metrics</span>
-          </div>
-          <div class="metric-grid">
-            <article class="metric-card">
-              <small>PHONE POSE (IN ROOM)</small>
-              <b id="phonePose">X: +1.00 &bull; Z: +1.00</b>
-              <span id="phoneHeadingText">Heading: 0&deg; (+Z)</span>
-            </article>
-            <article class="metric-card">
-              <small>TARGET (SHARED WORLD)</small>
-              <b id="targetWorld">X: &mdash; &bull; Z: &mdash;</b>
-              <span id="targetWorldSub">Waiting for detection</span>
-            </article>
-            <article class="metric-card">
-              <small>TARGET (IN LAPTOP FRAME)</small>
-              <b id="targetLaptop">x: &mdash; &bull; z: &mdash;</b>
-              <span id="viewGatingStatus">&mdash;</span>
-            </article>
-            <article class="metric-card">
-              <small>WEBCAM INTRINSICS</small>
-              <b id="intrinsics">Checking…</b>
-              <span>Field of view &bull; projection</span>
-            </article>
-          </div>
+    <p class="legend">
+      <i class="solid"></i> phone sees person
+      <i class="dashed"></i> person is <b>behind a wall</b> from that phone
+    </p>
+  </aside>
 
-          <!-- Direct Phone Position Controls from Laptop -->
-          <div class="laptop-phone-ctrl">
-            <span class="mini-title">QUICK ADJUST PHONE POSITION (FROM LAPTOP):</span>
-            <div class="ctrl-grid">
-              <div class="ctrl-cell">
-                <label for="lpPhoneX">Phone X (m):</label>
-                <input id="lpPhoneX" type="number" step="0.5" value="1.00">
-              </div>
-              <div class="ctrl-cell">
-                <label for="lpPhoneZ">Phone Z (m):</label>
-                <input id="lpPhoneZ" type="number" step="0.5" value="1.00">
-              </div>
-            </div>
-            <div class="preset-scenarios">
-              <button class="scene-btn" id="sceneFront">Preset: Phone in front of wall (X=1, Z=2)</button>
-              <button class="scene-btn" id="sceneBehind">Preset: Phone behind laptop (X=0, Z=-1.5)</button>
-              <button class="scene-btn" id="sceneLeft">Preset: Phone to the left (X=-2, Z=2)</button>
-            </div>
-          </div>
-        </section>
-      </aside>
-    </div>
-  </main>
-
-  <script src="/viewer.js"></script>
+  <script type="module" src="/world.js"></script>
 </body>
 </html>

@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from .skeleton import SkeletonFilter
 from .tracking import PersonTracker
 
 # Detections older than this are not fused (a phone stopped seeing someone).
@@ -111,6 +112,7 @@ class WorldState:
     def __init__(self) -> None:
         self.devices: dict[str, DeviceState] = {}
         self.tracker = PersonTracker()
+        self.skeletons: dict[str, SkeletonFilter] = {}
         self.room_version = 0
 
     def device(self, device_id: str) -> DeviceState:
@@ -179,16 +181,25 @@ class WorldState:
         people = []
         for person, (subject_id, smoothed) in zip(fused, tracked):
             offset = smoothed - person.root  # keep the skeleton attached to the smoothed root
+            skeleton = self.skeletons.get(subject_id)
+            if skeleton is None:
+                skeleton = self.skeletons[subject_id] = SkeletonFilter()
+            joints = skeleton.update(
+                {name: (pos + offset, conf) for name, (pos, conf) in person.joints.items()}, smoothed, now)
             people.append({
                 "id": subject_id,
                 "position": _round(smoothed),
                 "joints": [
-                    {"name": name, "position": _round(pos + offset), "confidence": round(conf, 3)}
-                    for name, (pos, conf) in sorted(person.joints.items())
+                    {"name": name, "position": _round(pos), "confidence": round(conf, 3)}
+                    for name, (pos, conf) in sorted(joints.items())
                 ],
                 "confidence": round(person.confidence, 3),
                 "seenBy": person.seen_by,
             })
+
+        # Forget skeletons of people that are gone (their ids are never reused).
+        for subject_id in [k for k, sk in self.skeletons.items() if now - sk.last_update > 5.0]:
+            del self.skeletons[subject_id]
 
         devices = [
             {

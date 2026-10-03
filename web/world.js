@@ -21,6 +21,13 @@ const SKELETON_LINKS = [
 ];
 const PERSON_COLORS = [0xbafa59, 0x55dfcf, 0xff8452, 0xc792ea, 0xffd166, 0xff6b9a];
 const DEVICE_COLORS = [0x4fc3f7, 0xf06292, 0xffb74d, 0x81c784, 0x9575cd];
+// iPhone wide camera field of view (degrees) along the image's long / short side.
+const PHONE_FOV_LONG = 69;
+const PHONE_FOV_SHORT = 54;
+// ARKit camera poses are landscape (local +X = bottom of a portrait phone); a
+// +90° roll about the viewing axis turns them into an upright portrait view.
+const PORTRAIT_ROLL = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI / 2);
+const ORBIT_FOV = 60;
 const SURFACE_COLORS = { wall: 0x9fb8c8, door: 0xff8452, window: 0x55dfcf, opening: 0x55dfcf };
 
 function colorFor(palette, key) {
@@ -42,7 +49,7 @@ const sun = new THREE.DirectionalLight(0xffffff, 0.8);
 sun.position.set(4, 10, 6);
 scene.add(sun);
 
-const camera = new THREE.PerspectiveCamera(60, 1, 0.02, 200);
+const camera = new THREE.PerspectiveCamera(60, 1, 0.02, 200); // fov reset to ORBIT_FOV outside helmet view
 camera.position.set(6, 7, 8);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
@@ -107,7 +114,8 @@ function setLabel(holder, text, color) {
 
 function disposeTree(obj) {
   obj.traverse(o => {
-    o.geometry?.dispose();
+    // Body parts share unit geometries; never free those.
+    if (![UNIT_CYLINDER, UNIT_SPHERE, UNIT_BOX].includes(o.geometry)) o.geometry?.dispose();
     if (o.material) {
       o.material.map?.dispose();
       o.material.dispose();
@@ -229,12 +237,15 @@ function makeDevice(id) {
   const color = colorFor(DEVICE_COLORS, id);
   const node = new THREE.Group();
   const body = new THREE.Mesh(
-    new THREE.BoxGeometry(0.075, 0.15, 0.012),
+    // ARKit's camera frame is the landscape sensor frame: local X runs along the
+    // phone's long side, so the body is wide in X.
+    new THREE.BoxGeometry(0.15, 0.075, 0.012),
     new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.35 }),
   );
   node.add(body);
   // View frustum: the camera looks down local −Z.
-  const d = 1.2, hw = Math.tan(THREE.MathUtils.degToRad(30)) * d, hh = Math.tan(THREE.MathUtils.degToRad(38)) * d;
+  // Wide camera: ~69° along the long (local X) side, ~54° along the short side.
+  const d = 1.2, hw = Math.tan(THREE.MathUtils.degToRad(PHONE_FOV_LONG / 2)) * d, hh = Math.tan(THREE.MathUtils.degToRad(PHONE_FOV_SHORT / 2)) * d;
   const corners = [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].map(([x, y]) => new THREE.Vector3(x, y, -d));
   const pts = [];
   corners.forEach((c, i) => { pts.push(new THREE.Vector3(), c, c, corners[(i + 1) % 4]); });
@@ -275,46 +286,119 @@ function updateDevices(devices) {
 const personNodes = new Map();
 const raycaster = new THREE.Raycaster();
 
+// Mannequin body: limb capsules (cylinder + joint spheres), a torso block and a head.
+// [parent, child, radius m]
+const BODY_BONES = [
+  ['left_shoulder', 'left_elbow', 0.05], ['left_elbow', 'left_wrist', 0.04],
+  ['right_shoulder', 'right_elbow', 0.05], ['right_elbow', 'right_wrist', 0.04],
+  ['left_hip', 'left_knee', 0.07], ['left_knee', 'left_ankle', 0.055],
+  ['right_hip', 'right_knee', 0.07], ['right_knee', 'right_ankle', 0.055],
+];
+const HEAD_JOINTS = ['nose', 'left_eye', 'right_eye', 'left_ear', 'right_ear'];
+const UNIT_CYLINDER = new THREE.CylinderGeometry(1, 1, 1, 14);
+const UNIT_SPHERE = new THREE.SphereGeometry(1, 18, 12);
+const UNIT_BOX = new THREE.BoxGeometry(1, 1, 1);
+const Y_AXIS = new THREE.Vector3(0, 1, 0);
+
 function makePerson(id) {
   const color = colorFor(PERSON_COLORS, id);
   const node = new THREE.Group();
-  // X-ray style: people draw on top of walls so they are visible behind them.
-  const jointMat = new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true });
-  const lineMat = new THREE.LineBasicMaterial({ color, depthTest: false, transparent: true });
-  const lines = new THREE.LineSegments(new THREE.BufferGeometry(), lineMat);
-  lines.renderOrder = 10;
-  const joints = new THREE.InstancedMesh(new THREE.SphereGeometry(0.035, 10, 8), jointMat, 16);
-  joints.renderOrder = 10;
+  // Walls, floors and furniture don't write depth, so bodies stay visible behind
+  // them while still occluding their own limbs correctly.
+  const material = new THREE.MeshStandardMaterial({
+    color, emissive: color, emissiveIntensity: 0.35, roughness: 0.6, transparent: true, opacity: 0.92,
+  });
+  const pool = name => {
+    const mesh = new THREE.Mesh(name === 'torso' ? UNIT_BOX : name.startsWith('j:') || name === 'head' ? UNIT_SPHERE : UNIT_CYLINDER, material);
+    mesh.renderOrder = 10;
+    node.add(mesh);
+    return mesh;
+  };
   const ring = new THREE.Mesh(
     new THREE.RingGeometry(0.22, 0.26, 32),
     new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide, transparent: true, opacity: 0.8 }),
   );
   ring.rotation.x = -Math.PI / 2;
   const labelHolder = new THREE.Group();
-  node.add(lines, joints, ring, labelHolder);
-  node.userData = { color, lines, joints, ring, labelHolder, jointMat, lineMat };
+  node.add(ring, labelHolder);
+  node.userData = { color, ring, labelHolder, material, parts: new Map(), pool };
   peopleGroup.add(node);
   return node;
 }
 
-function updatePerson(node, person) {
-  const { lines, joints, ring, labelHolder } = node.userData;
-  const byName = Object.fromEntries(person.joints.map(j => [j.name, new THREE.Vector3(...j.position)]));
-  const segs = [];
-  SKELETON_LINKS.forEach(([a, b]) => { if (byName[a] && byName[b]) segs.push(byName[a], byName[b]); });
-  lines.geometry.dispose();
-  lines.geometry = new THREE.BufferGeometry().setFromPoints(segs);
+function part(node, name) {
+  const { parts, pool } = node.userData;
+  if (!parts.has(name)) parts.set(name, pool(name));
+  const mesh = parts.get(name);
+  mesh.visible = true;
+  return mesh;
+}
 
-  const m = new THREE.Matrix4();
-  const list = Object.values(byName);
-  joints.count = Math.min(list.length, 16);
-  list.slice(0, 16).forEach((p, i) => joints.setMatrixAt(i, m.makeTranslation(p.x, p.y, p.z)));
-  joints.instanceMatrix.needsUpdate = true;
+function placeBone(mesh, a, b, radius) {
+  const dir = b.clone().sub(a);
+  const length = dir.length();
+  mesh.position.copy(a).add(b).multiplyScalar(0.5);
+  mesh.quaternion.setFromUnitVectors(Y_AXIS, dir.divideScalar(length || 1));
+  mesh.scale.set(radius, length, radius);
+}
+
+const mid = (a, b) => a.clone().add(b).multiplyScalar(0.5);
+
+function updatePerson(node, person) {
+  const { ring, labelHolder, parts } = node.userData;
+  parts.forEach(m => { m.visible = false; });
+  const J = Object.fromEntries(person.joints.map(j => [j.name, new THREE.Vector3(...j.position)]));
+
+  // Limbs: cylinder per bone + a sphere on each joint (reads as capsules).
+  for (const [a, b, r] of BODY_BONES) {
+    if (!J[a] || !J[b]) continue;
+    placeBone(part(node, `${a}|${b}`), J[a], J[b], r);
+    for (const [name, p] of [[a, J[a]], [b, J[b]]]) {
+      const sphere = part(node, `j:${name}`);
+      sphere.position.copy(p);
+      sphere.scale.setScalar(r * 1.05);
+    }
+  }
+
+  // Torso: a box spanning shoulders → hips, oriented by the shoulder line.
+  const ls = J.left_shoulder, rs = J.right_shoulder, lh = J.left_hip, rh = J.right_hip;
+  const shoulders = ls && rs ? mid(ls, rs) : J.neck;
+  const hips = lh && rh ? mid(lh, rh) : J.root;
+  if (shoulders && hips) {
+    const up = shoulders.clone().sub(hips);
+    const height = up.length();
+    up.normalize();
+    const across = ls && rs ? ls.clone().sub(rs) : new THREE.Vector3(1, 0, 0);
+    const width = Math.max(ls && rs ? across.length() : 0.36, 0.2);
+    across.sub(up.clone().multiplyScalar(across.dot(up))).normalize();
+    const forward = new THREE.Vector3().crossVectors(across, up).normalize();
+    const torso = part(node, 'torso');
+    torso.position.copy(mid(shoulders, hips));
+    torso.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(across, up, forward));
+    torso.scale.set(width, height, 0.2);
+  }
+
+  // Head: sphere at the centre of the face/ear landmarks, else above the neck.
+  const head = HEAD_JOINTS.map(n => J[n]).filter(Boolean);
+  let headCentre = null;
+  if (head.length) {
+    headCentre = head.reduce((acc, p) => acc.add(p), new THREE.Vector3()).divideScalar(head.length);
+    if (head.length === 1) headCentre.y += 0.03;
+  } else if (shoulders) {
+    headCentre = shoulders.clone().add(new THREE.Vector3(0, 0.22, 0));
+  }
+  if (headCentre) {
+    const sphere = part(node, 'head');
+    sphere.position.copy(headCentre);
+    sphere.scale.set(0.1, 0.12, 0.1);
+    const neckBase = J.neck ?? shoulders;
+    if (neckBase) placeBone(part(node, 'neck'), neckBase, headCentre, 0.045);
+  }
 
   const root = new THREE.Vector3(...person.position);
   ring.position.set(root.x, grid.position.y + 0.01, root.z);
-  const top = byName.nose ?? root.clone().add(new THREE.Vector3(0, 0.8, 0));
-  labelHolder.position.set(top.x, top.y + 0.25, top.z);
+  const top = headCentre ?? root.clone().add(new THREE.Vector3(0, 0.8, 0));
+  labelHolder.position.set(top.x, top.y + 0.28, top.z);
 }
 
 // Does a scanned wall block the straight line from `from` to `to`?
@@ -348,7 +432,7 @@ function updatePeople(people, devices) {
       const blocked = !sees && wallBetween(from, target);
       if (blocked) hiddenFrom.push(dev.name);
       if (!sees && !blocked) return;
-      const color = sees ? node.userData.color : 0xff8452;
+      const color = sees ? node.userData.color : 0xff8452;  // dashed orange = through a wall
       const material = sees
         ? new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.55 })
         : new THREE.LineDashedMaterial({ color, dashSize: 0.15, gapSize: 0.1, depthTest: false, transparent: true });
@@ -484,21 +568,54 @@ function connect() {
 }
 
 // ── Render loop ──────────────────────────────────────────────────────────────
+// Helmet view: render exactly what the phone sees, upright, in a portrait 3:4
+// frame (the phone camera's aspect) centred in the area left of the side panel.
+function renderHelmetView(node) {
+  const W = window.innerWidth, H = window.innerHeight;
+  const panel = window.innerWidth > 720 ? 330 : 0;
+  const h = H - 60, w = Math.min(h * 3 / 4, W - panel - 24);
+  const x = Math.max(12, (W - panel - w) / 2), y = 12;
+
+  camera.position.copy(node.position);
+  camera.quaternion.copy(node.quaternion).multiply(PORTRAIT_ROLL);
+  camera.fov = PHONE_FOV_LONG;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+
+  renderer.setScissorTest(false);
+  renderer.setViewport(0, 0, W, H);
+  renderer.setClearColor(0x020407);
+  renderer.clear();
+  renderer.setScissorTest(true);
+  renderer.setScissor(x, y, w, h);
+  renderer.setViewport(x, y, w, h);
+  renderer.setClearColor(0x05090e);
+  node.visible = false; // don't render the phone inside its own view
+  renderer.render(scene, camera);
+  node.visible = true;
+  renderer.setScissorTest(false);
+}
+
+function restoreOrbitCamera() {
+  renderer.setViewport(0, 0, window.innerWidth, window.innerHeight);
+  if (camera.fov !== ORBIT_FOV || camera.aspect !== window.innerWidth / window.innerHeight) {
+    camera.fov = ORBIT_FOV;
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+  }
+}
+
 function frame() {
   requestAnimationFrame(frame);
   if (viewMode === 'follow') {
     const node = deviceNodes.get(followId);
     if (node && node.visible) {
-      // Helmet view: the three.js camera takes the phone's exact pose.
-      camera.position.copy(node.position);
-      camera.quaternion.copy(node.quaternion);
-      node.visible = false; // don't render the phone inside its own view
-      renderer.render(scene, camera);
-      node.visible = true;
+      renderHelmetView(node);
       return;
     }
     setView('orbit');
   }
+  restoreOrbitCamera();
   if (lastWorldAt && performance.now() - lastWorldAt > 2000 && lastDevices.length) {
     $('hubStatus').textContent = 'NO WORLD DATA';
   }

@@ -1,28 +1,17 @@
-"""Viewer presentation and hub snapshot correctness.
+"""Hub snapshot and phone-status correctness.
 
-These cover bugs that made the laptop map lie about reality:
-
-* the viewer drew a fake PHONE marker at a hardcoded `+1, +1` even when no
-  phone had ever connected, so an empty system looked like a tracked phone;
-* `calibrated` was assigned but never used, so an uncalibrated phone was drawn
-  exactly like a calibrated one;
-* a newly connected viewer replayed the hub's `last_packet`, which could be a
-  stale `debug_pose` or a target from a previous session (a ghost person).
+* a newly connected viewer must not replay the hub's `last_packet`, which could
+  be a stale `debug_pose` or a target from a previous session (a ghost person);
+* the hub must record the phone's pose source, tracking state and liveness.
 """
 from __future__ import annotations
 
 import asyncio
-import json
-import re
-from pathlib import Path
 
 import pytest
 
 from spatial_relay.calibration import Device
 from spatial_relay.server import RelayHub
-
-VIEWER_JS = Path(__file__).resolve().parents[1] / "web" / "viewer.js"
-
 
 def quat(yaw_deg: float = 0.0) -> list[float]:
     import math
@@ -33,58 +22,6 @@ def quat(yaw_deg: float = 0.0) -> list[float]:
 
 def pose_packet(position: list[float], yaw_deg: float = 0.0) -> dict:
     return {"position": position, "quaternionXyzw": quat(yaw_deg), "timestampNs": 1}
-
-
-@pytest.fixture(scope="module")
-def viewer_js() -> str:
-    return VIEWER_JS.read_text(encoding="utf-8")
-
-
-class TestViewerDoesNotFakeAPhone:
-    def test_phone_state_does_not_start_at_a_hardcoded_offset(self, viewer_js: str) -> None:
-        m = re.search(r"const phoneState = \{([^}]*)\}", viewer_js)
-        assert m, "phoneState declaration not found"
-        body = m.group(1)
-        assert "x: 1.0" not in body, "phone still starts at a fake x of 1.0"
-        assert "z: 1.0" not in body, "phone still starts at a fake z of 1.0"
-
-    def test_requires_a_live_packet_before_drawing_the_marker(self, viewer_js: str) -> None:
-        assert "function phoneIsLive()" in viewer_js
-        # The marker block must be guarded by liveness, not drawn unconditionally.
-        assert re.search(r"if \(phoneIsLive\(\)\) \{", viewer_js), (
-            "phone marker is not guarded by phoneIsLive()"
-        )
-
-    def test_draws_an_explicit_waiting_state_when_absent(self, viewer_js: str) -> None:
-        assert "WAITING FOR PHONE" in viewer_js
-
-    def test_detects_a_phone_that_vanished_without_a_socket_close(self, viewer_js: str) -> None:
-        assert "PHONE_STALE_MS" in viewer_js
-        assert "lastPhonePacketMs" in viewer_js
-
-    def test_phone_is_marked_offline_when_packets_go_stale(self, viewer_js: str) -> None:
-        assert "PHONE OFFLINE" in viewer_js
-
-
-class TestViewerHonoursCalibrationState:
-    def test_calibration_flag_is_actually_consumed(self, viewer_js: str) -> None:
-        assert viewer_js.count("calibrated") > 5, (
-            "calibrated is still effectively unused in viewer.js"
-        )
-
-    def test_uncalibrated_phone_is_labelled_on_the_map(self, viewer_js: str) -> None:
-        assert "UNCALIBRATED" in viewer_js
-
-    def test_reads_calibrated_from_incoming_packets(self, viewer_js: str) -> None:
-        assert "typeof p.calibrated === 'boolean'" in viewer_js
-
-
-class TestViewerSocketSnapshot:
-    def test_onclose_resets_phone_liveness(self, viewer_js: str) -> None:
-        # A closed socket must not leave a marker frozen on the map.
-        onclose = re.search(r"socket\.onclose = \(\) => \{(.*?)\n  \};", viewer_js, re.S)
-        assert onclose, "socket.onclose handler not found"
-        assert "phoneSeen = false" in onclose.group(1)
 
 
 class FakeViewer:
@@ -116,28 +53,6 @@ class TestHubSnapshotReplaysOnlyRealDetections:
 
         asyncio.run(hub.broadcast({"type": "target", "subjectId": "target_01"}))
         assert hub.last_target is not None and hub.last_target["type"] == "target"
-
-
-class TestViewerShowsPoseSourceAndTracking:
-    """The viewer must say where the phone pose came from.
-
-    ARKit gives metric poses and the legacy path only ever had step-count dead
-    reckoning. Showing an identical marker for both hides which one is running,
-    which is exactly the confusion that made the old numbers look wrong.
-    """
-
-    def test_handles_the_phone_status_snapshot(self, viewer_js: str) -> None:
-        assert "p.type === 'phone_status'" in viewer_js, (
-            "viewer ignores the hub's phone_status snapshot"
-        )
-
-    def test_displays_the_pose_source(self, viewer_js: str) -> None:
-        assert "poseSourceLabel" in viewer_js
-        assert "'ARKit'" in viewer_js and "'SENSORS'" in viewer_js
-
-    def test_surfaces_degraded_arkit_tracking(self, viewer_js: str) -> None:
-        assert "phoneTracking" in viewer_js
-        assert "limitedReason" in viewer_js
 
 
 class TestHubReportsPhoneStatus:

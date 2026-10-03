@@ -59,8 +59,8 @@ If signing fails because the bundle ID is taken, change `bundleID` in `xtool.yml
 ## Using it
 
 1. Start the hub on the laptop: `PYTHONPATH=src python3 -m uvicorn spatial_relay.server:app --host 0.0.0.0 --port 8000` and open `http://localhost:8000`.
-2. Hold the phone right beside the laptop webcam, rear camera facing the same way as the webcam, and tap **Calibrate** (or press **Reset origin** on the website — the hub forwards it to the phone).
-3. Walk around. The phone streams its pose at 25 Hz and person detections at ~15 Hz. Filled joint dots on the phone have LiDAR depth and are sent; hollow orange dots had no valid depth.
+2. Either scan + share the rooms / **Join shared map** (see below), or hold each phone at the same agreed spot and direction and tap **Calibrate**.
+3. Walk around. The phone streams its pose at 25 Hz and person detections at ~20 Hz. Filled joint dots have a depth and are sent; hollow red dots had no valid depth.
 
 If the app is backgrounded, ARKit may restart tracking from a new origin — calibrate again.
 
@@ -70,7 +70,7 @@ If the app is backgrounded, ARKit may restart tracking from a new origin — cal
   **Finish this room**, then **Next room**, then **Save & share**. This uploads the room model
   (`POST /api/room`) and the ARWorldMap (`POST /api/worldmap`).
 - **Join shared map** (any ARKit iPhone): downloads the map and relocalizes. After that, poses and
-  people are sent in the shared frame (`frame: "map"`), and the laptop's `world.html` shows everyone.
+  people are sent in the shared frame (`frame: "map"`), and the laptop's world view (`http://<laptop>:8000`) shows everyone.
 - Without LiDAR, each person's depth is estimated from their torso length (about 0.5 m), at roughly
   ±20–30% accuracy.
 - In shared map mode each phone shows people seen by *other* phones as x-ray skeletons in AR, marked

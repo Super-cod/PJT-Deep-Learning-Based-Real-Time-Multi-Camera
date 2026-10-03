@@ -17,6 +17,8 @@ final class WorldOverlay {
 
     private let roomNode = SCNNode()
     private let scanNode = SCNNode()
+    /// Holds world-frame content (people, phones); its transform maps world → this ARKit session.
+    private let worldNode = SCNNode()
     private let peopleNode = SCNNode()
     private let devicesNode = SCNNode()
     private var people: [String: PersonNode] = [:]
@@ -43,7 +45,8 @@ final class WorldOverlay {
     }
 
     init() {
-        [roomNode, scanNode, peopleNode, devicesNode].forEach { scene.rootNode.addChildNode($0) }
+        [roomNode, scanNode, worldNode].forEach { scene.rootNode.addChildNode($0) }
+        [peopleNode, devicesNode].forEach { worldNode.addChildNode($0) }
     }
 
     // ── Shared room walls ────────────────────────────────────────────────────
@@ -57,6 +60,10 @@ final class WorldOverlay {
             roomNode.addChildNode(surfaceNode(dimensions: door.dimensions.vec3, transform: Self.matrix(door.transform),
                                               color: .orange, alpha: 0.18, isWall: false))
         }
+    }
+
+    func clearRoom() {
+        roomNode.childNodes.forEach { $0.removeFromParentNode() }
     }
 
     // ── Live scan (RoomPlan didUpdate) ───────────────────────────────────────
@@ -85,7 +92,13 @@ final class WorldOverlay {
     // ── Remote people + phones (hub world packet) ───────────────────────────
     /// Returns how many remote people are shown and how many of them are behind a wall.
     @discardableResult
-    func update(world: WorldPacket, myDeviceId: String, cameraPosition: SIMD3<Float>) -> (shown: Int, hidden: Int) {
+    func update(world: WorldPacket, myDeviceId: String, cameraPosition: SIMD3<Float>,
+                arkitFromWorld: simd_float4x4 = matrix_identity_float4x4) -> (shown: Int, hidden: Int) {
+        worldNode.simdTransform = arkitFromWorld
+        let toARKit = { (p: SIMD3<Float>) -> SIMD3<Float> in
+            let v = arkitFromWorld * SIMD4(p.x, p.y, p.z, 1)
+            return SIMD3(v.x, v.y, v.z)
+        }
         let names = Dictionary(world.devices.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
 
         // People this phone already sees are drawn by the 2D overlay; show the rest.
@@ -102,7 +115,7 @@ final class WorldOverlay {
             }()
             node.update(joints: person.joints, links: Self.links)
 
-            let chest = person.position.vec3 + SIMD3(0, 0.35, 0)
+            let chest = toARKit(person.position.vec3 + SIMD3(0, 0.35, 0))
             // 0.5 m steps: the label texture is only redrawn when its text changes.
             let distance = (simd_distance(cameraPosition, chest) * 2).rounded() / 2
             let behindWall = wallBetween(cameraPosition, chest)
@@ -183,7 +196,8 @@ final class WorldOverlay {
 
     private static func deviceMarker(name: String) -> SCNNode {
         let node = SCNNode()
-        let body = SCNNode(geometry: SCNBox(width: 0.08, height: 0.16, length: 0.015, chamferRadius: 0.01))
+        // ARKit camera frame is landscape: the phone's long side is local X.
+        let body = SCNNode(geometry: SCNBox(width: 0.16, height: 0.08, length: 0.015, chamferRadius: 0.01))
         body.geometry?.materials = [xray(.systemPink)]
         body.renderingOrder = 50
         node.addChildNode(body)
@@ -246,71 +260,127 @@ final class WorldOverlay {
     }
 }
 
-/// A remote person's skeleton: joint spheres + bone cylinders + a label.
+/// A remote person as a mannequin: capsule limbs, a torso block and a head, plus a label.
 private final class PersonNode {
     let root = SCNNode()
-    private var joints: [String: SCNNode] = [:]
-    private var bones: [String: SCNNode] = [:]
+    private var parts: [String: SCNNode] = [:]
     private let ring: SCNNode
     private var label: SCNNode?
     private var labelText = ""
     private let color: UIColor
     private let material: SCNMaterial
 
+    /// (parent, child, radius m)
+    private static let bones: [(String, String, Float)] = [
+        ("left_shoulder", "left_elbow", 0.05), ("left_elbow", "left_wrist", 0.04),
+        ("right_shoulder", "right_elbow", 0.05), ("right_elbow", "right_wrist", 0.04),
+        ("left_hip", "left_knee", 0.07), ("left_knee", "left_ankle", 0.055),
+        ("right_hip", "right_knee", 0.07), ("right_knee", "right_ankle", 0.055),
+    ]
+    private static let headJoints = ["nose", "left_eye", "right_eye", "left_ear", "right_ear"]
+
     init(color: UIColor) {
         self.color = color
-        material = WorldOverlay.xray(color)
+        material = SCNMaterial()
+        material.diffuse.contents = color
+        material.emission.contents = color.withAlphaComponent(0.45)
+        material.lightingModel = .lambert
+        material.transparency = 0.9
+        // Room walls don't write depth, so the body shows through them while
+        // still hiding its own far limbs.
+        material.readsFromDepthBuffer = true
         let torus = SCNTorus(ringRadius: 0.25, pipeRadius: 0.012)
-        torus.materials = [material]
+        torus.materials = [WorldOverlay.xray(color)]
         ring = SCNNode(geometry: torus)
         ring.renderingOrder = 60
         root.addChildNode(ring)
     }
 
+    private func part(_ key: String, make: () -> SCNGeometry) -> SCNNode {
+        if let node = parts[key] {
+            node.isHidden = false
+            return node
+        }
+        let geometry = make()
+        geometry.materials = [material]
+        let node = SCNNode(geometry: geometry)
+        node.renderingOrder = 60
+        parts[key] = node
+        root.addChildNode(node)
+        return node
+    }
+
+    private func bone(_ key: String, _ a: SIMD3<Float>, _ b: SIMD3<Float>, radius: Float) {
+        let length = simd_distance(a, b)
+        guard length > 0.01 else { return }
+        let node = part(key) { SCNCylinder(radius: 1, height: 1) }
+        node.simdPosition = (a + b) / 2
+        node.simdOrientation = simd_quatf(from: SIMD3(0, 1, 0), to: (b - a) / length)
+        node.simdScale = SIMD3(radius, length, radius)
+    }
+
+    private func ball(_ key: String, at p: SIMD3<Float>, radius: SIMD3<Float>) {
+        let node = part(key) { SCNSphere(radius: 1) }
+        node.simdPosition = p
+        node.simdOrientation = simd_quatf(angle: 0, axis: SIMD3(0, 1, 0))
+        node.simdScale = radius
+    }
+
     func update(joints list: [WorldPacket.Joint], links: [(String, String)]) {
-        var positions: [String: SIMD3<Float>] = [:]
-        for joint in list {
-            let p = joint.position.vec3
-            positions[joint.name] = p
-            let node = joints[joint.name] ?? {
-                let sphere = SCNSphere(radius: 0.04)
-                sphere.materials = [material]
-                let n = SCNNode(geometry: sphere)
-                n.renderingOrder = 60
-                joints[joint.name] = n
-                root.addChildNode(n)
-                return n
-            }()
-            node.simdPosition = p
-        }
-        for (name, node) in joints where positions[name] == nil { node.removeFromParentNode(); joints[name] = nil }
+        parts.values.forEach { $0.isHidden = true }
+        var J: [String: SIMD3<Float>] = [:]
+        for joint in list { J[joint.name] = joint.position.vec3 }
 
-        for (a, b) in links {
-            let key = a + "|" + b
-            guard let pa = positions[a], let pb = positions[b], simd_distance(pa, pb) > 0.01 else {
-                bones[key]?.removeFromParentNode()
-                bones[key] = nil
-                continue
+        // Limbs: cylinder per bone + a sphere on each end (reads as a capsule).
+        for (a, b, r) in Self.bones {
+            guard let pa = J[a], let pb = J[b] else { continue }
+            bone(a + "|" + b, pa, pb, radius: r)
+            ball("j:" + a, at: pa, radius: SIMD3(repeating: r * 1.05))
+            ball("j:" + b, at: pb, radius: SIMD3(repeating: r * 1.05))
+        }
+
+        // Torso box from the shoulder line to the hip line.
+        let shoulders: SIMD3<Float>? = {
+            if let l = J["left_shoulder"], let r = J["right_shoulder"] { return (l + r) / 2 }
+            return J["neck"]
+        }()
+        let hips: SIMD3<Float>? = {
+            if let l = J["left_hip"], let r = J["right_hip"] { return (l + r) / 2 }
+            return J["root"]
+        }()
+        if let shoulders, let hips, simd_distance(shoulders, hips) > 0.1 {
+            let up = simd_normalize(shoulders - hips)
+            var across = SIMD3<Float>(1, 0, 0)
+            var width: Float = 0.36
+            if let l = J["left_shoulder"], let r = J["right_shoulder"] {
+                across = l - r
+                width = max(simd_length(across), 0.2)
             }
-            let node = bones[key] ?? {
-                let cylinder = SCNCylinder(radius: 0.015, height: 1)
-                cylinder.materials = [material]
-                let n = SCNNode(geometry: cylinder)
-                n.renderingOrder = 60
-                bones[key] = n
-                root.addChildNode(n)
-                return n
-            }()
-            (node.geometry as? SCNCylinder)?.height = CGFloat(simd_distance(pa, pb))
-            node.simdPosition = (pa + pb) / 2
-            node.simdOrientation = simd_quatf(from: SIMD3(0, 1, 0), to: simd_normalize(pb - pa))
+            across = simd_normalize(across - up * simd_dot(across, up))
+            let forward = simd_cross(across, up)
+            let node = part("torso") { SCNBox(width: 1, height: 1, length: 1, chamferRadius: 0.15) }
+            node.simdPosition = (shoulders + hips) / 2
+            node.simdOrientation = simd_quatf(simd_float3x3(columns: (across, up, forward)))
+            node.simdScale = SIMD3(width, simd_distance(shoulders, hips), 0.2)
         }
 
-        let feet = [positions["left_ankle"], positions["right_ankle"]].compactMap { $0 }
-        let hips = [positions["left_hip"], positions["right_hip"]].compactMap { $0 }
-        let base = feet.isEmpty ? (hips.first ?? .zero) - SIMD3(0, 0.9, 0) : feet.reduce(.zero, +) / Float(feet.count)
+        // Head at the centre of the face / ear landmarks, else above the shoulders.
+        let face = Self.headJoints.compactMap { J[$0] }
+        var head: SIMD3<Float>?
+        if !face.isEmpty {
+            head = face.reduce(.zero, +) / Float(face.count) + (face.count == 1 ? SIMD3(0, 0.03, 0) : .zero)
+        } else if let shoulders {
+            head = shoulders + SIMD3(0, 0.22, 0)
+        }
+        if let head {
+            ball("head", at: head, radius: SIMD3(0.1, 0.12, 0.1))
+            if let neckBase = J["neck"] ?? shoulders { bone("neck", neckBase, head, radius: 0.045) }
+        }
+
+        let feet = [J["left_ankle"], J["right_ankle"]].compactMap { $0 }
+        let base = feet.isEmpty ? (hips ?? head ?? .zero) - SIMD3(0, 0.9, 0) : feet.reduce(.zero, +) / Float(feet.count)
         ring.simdPosition = base
-        let top = positions["nose"] ?? base + SIMD3(0, 1.7, 0)
+        let top = head ?? base + SIMD3(0, 1.7, 0)
         label?.simdPosition = top + SIMD3(0, 0.3, 0)
     }
 

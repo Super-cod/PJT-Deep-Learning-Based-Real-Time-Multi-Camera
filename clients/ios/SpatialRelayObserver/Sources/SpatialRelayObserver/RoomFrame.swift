@@ -1,21 +1,17 @@
 import Foundation
 import simd
 
-/// The shared room frame, anchored to the phone's camera pose at calibration.
+/// Calibrated-room mode: the world frame defined by the phone's pose at Calibrate.
 ///
-/// Hub convention (see `src/spatial_relay/transforms.py`):
-///  +X = right of the laptop, +Y = up, +Z = forward into the room.
-///  Yaw is about +Y; 0 faces +Z and positive turns right (towards +X).
-///
-/// ARKit (with `.gravity` alignment) is right-handed with +Y up and the camera
-/// looking down its local −Z. This type converts ARKit world points into room
-/// coordinates by projecting onto the horizontal forward/right axes captured at
-/// calibration, so the hub never sees ARKit's arbitrary session origin.
+/// The origin is the camera position at calibration, +Y is up (gravity) and the
+/// camera's horizontal viewing direction at calibration is −Z: right-handed, the
+/// same convention as ARKit, the shared ARWorldMap and the three.js website.
+/// Phones calibrated at the same spot, facing the same way, share this frame.
 struct RoomFrame {
     let origin: SIMD3<Float>
-    /// Horizontal unit vector → room +Z.
+    /// Horizontal unit vector: the camera's viewing direction at calibration (world −Z).
     let forward: SIMD3<Float>
-    /// Horizontal unit vector → room +X.
+    /// Horizontal unit vector to the camera's right at calibration (world +X).
     let right: SIMD3<Float>
 
     init?(cameraTransform t: simd_float4x4) {
@@ -26,16 +22,16 @@ struct RoomFrame {
         right = SIMD3(-f.z, 0, f.x)
     }
 
-    /// ARKit world point → room coordinates.
-    func toRoom(_ p: SIMD3<Float>) -> SIMD3<Float> {
-        let d = p - origin
-        return SIMD3(simd_dot(d, right), d.y, simd_dot(d, forward))
-    }
-
-    /// Heading of the camera relative to calibration (radians, + = turned right).
-    func yaw(of t: simd_float4x4) -> Float {
-        guard let f = RoomFrame.horizontalForward(of: t) else { return 0 }
-        return atan2(simd_dot(f, right), simd_dot(f, forward))
+    /// World ← ARKit transform used for streaming.
+    var worldFromARKit: simd_float4x4 {
+        let back = -forward
+        let arkitFromWorld = simd_float4x4(columns: (
+            SIMD4(right.x, right.y, right.z, 0),
+            SIMD4(0, 1, 0, 0),
+            SIMD4(back.x, back.y, back.z, 0),
+            SIMD4(origin.x, origin.y, origin.z, 1)
+        ))
+        return arkitFromWorld.inverse
     }
 
     /// Horizontal viewing direction of the rear camera. ARKit's camera frame is
@@ -49,19 +45,6 @@ struct RoomFrame {
         let combined = back + top
         return simd_length(combined) > 1e-3 ? simd_normalize(combined) : nil
     }
-}
-
-/// Inverse of the hub's yaw-only phone transform: room point → phone-local
-/// [x right, y up, z forward] so the hub's `world_from_phone` reproduces it
-/// exactly (including camera pitch, which the hub's pose model ignores).
-func phoneLocal(room point: SIMD3<Float>, phonePosition: SIMD3<Float>, yaw: Float) -> SIMD3<Float> {
-    let d = point - phonePosition
-    let c = cos(yaw), s = sin(yaw)
-    return SIMD3(c * d.x - s * d.z, d.y, s * d.x + c * d.z)
-}
-
-func yawQuaternionXyzw(_ yaw: Float) -> [Float] {
-    [0, sin(yaw / 2), 0, cos(yaw / 2)]
 }
 
 extension simd_float4x4 {

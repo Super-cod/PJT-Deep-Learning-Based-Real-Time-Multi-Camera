@@ -1,6 +1,6 @@
 # Spatial Relay
 
-Processing hub and demonstrator for **deep-learning-based real-time multi-camera human localization and AR-assisted situational awareness**. The system synchronizes multiple observer viewpoints into a single unified 3D room coordinate system: an iPhone observer supplies camera feed, real-time pose, and 3D human body skeleton detections; a Python hub transforms and tracks targets in a shared coordinate frame; and a laptop AR console visualizes augmented human overlays and a 2D floor map.
+Processing hub and demonstrator for **deep-learning-based real-time multi-camera human localization and AR-assisted situational awareness**. The system synchronizes multiple observer viewpoints into a single unified 3D room coordinate system: iPhones act as helmet-mounted observers that track themselves with ARKit and localize every person they see in 3D with LiDAR; a Python hub fuses all phones in one shared frame and tracks people with stable ids; the laptop shows a live 3D world view of the scanned rooms, phones and people, including people hidden behind walls.
 
 ---
 
@@ -8,13 +8,13 @@ Processing hub and demonstrator for **deep-learning-based real-time multi-camera
 
 ```
  ┌───────────────────────────┐                 ┌───────────────────────────┐
- │   iPhone Mobile Observer  │                 │    Laptop AR Console      │
- │   (Swift · ARKit · LiDAR) │                 │      (Web / Browser)      │
+ │  iPhone Helmet Observers  │                 │   Laptop 3D World View    │
+ │   (Swift · ARKit · LiDAR) │                 │  (Web / Browser, three.js)│
  │                           │                 │                           │
- │ • ARKit 6-DoF Tracking    │                 │ • Webcam Pinhole Viewport │
- │ • Apple Vision Body Pose  │                 │ • Frustum Gating Overlays │
- │ • LiDAR Per-Joint Depth   │                 │ • Real-time 2D Floor Map  │
- │ • Multi-Person Detection  │                 │ • Interactive Calibration │
+ │ • ARKit 6-DoF Tracking    │                 │ • Scanned rooms & walls   │
+ │ • Apple Vision Body Pose  │                 │ • Every phone + view cone │
+ │ • LiDAR Per-Joint Depth   │                 │ • People, through walls   │
+ │ • RoomPlan + Shared Map   │                 │ • Helmet (POV) views      │
  └─────────────┬─────────────┘                 └─────────────▲─────────────┘
                │                                             │
                │  WebSocket: /ws/observer                    │  WebSocket: /ws/viewer
@@ -23,9 +23,9 @@ Processing hub and demonstrator for **deep-learning-based real-time multi-camera
       │                         Python Relay Hub                           │
       │                     (FastAPI + Uvicorn + NumPy)                    │
       │                                                                    │
-      │ • Shared coordinate frame calibration (T_world_from_phone)         │
-      │ • Multi-person tracking with stable person_NN ids                  │
-      │ • 25 Hz continuous pose broadcasting and viewer synchronization    │
+      │ • Multi-phone fusion in one shared world frame                     │
+      │ • Multi-person tracking, stable ids, smoothed rigid skeletons      │
+      │ • 15 Hz world packets to the website and every phone               │
       └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -41,10 +41,10 @@ Processing hub and demonstrator for **deep-learning-based real-time multi-camera
 | **M4 Shared Frame Calibration**| Rigid coordinate transforms mapping phone and laptop into world $W$ | `src/spatial_relay/calibration.py`, `RoomFrame.swift` |
 | **M4b Multi-Person Tracking** | Stable `person_NN` ids across frames (nearest-neighbour + 1-euro smoothing) | `src/spatial_relay/tracking.py` |
 | **M5 Real-Time Relay** | FastAPI WebSocket server broadcasting at 25 FPS | `src/spatial_relay/server.py` |
-| **M6 AR Projection** | Laptop camera frustum gating, skeleton projection and floor map | `web/viewer.js`, `web/index.html` |
 | **M8 Room Model & Shared Map** | RoomPlan multi-room scan + ARWorldMap relocalization | `RoomScanner.swift`, `src/spatial_relay/room.py` |
 | **M9 Multi-Phone Fusion** | Cross-camera person fusion + 15 Hz world packet | `src/spatial_relay/world.py` |
-| **M10 3D World View** | three.js god view, helmet views, through-wall sight lines | `web/world.html`, `web/world.js` |
+| **M11 Body Model** | Person-segmented LiDAR depth, 19 joints, per-joint 1-euro smoothing, learned rigid limb lengths, mannequin rendering | `ObserverController.swift`, `src/spatial_relay/skeleton.py` |
+| **M10 3D World View** | three.js god view, helmet views, through-wall sight lines | `web/index.html`, `web/world.js` |
 | **M7 Visual-Inertial Odometry** | ARKit world tracking, gravity aligned | `ObserverController.swift` |
 
 ---
@@ -81,22 +81,15 @@ xtool dev        # builds, signs and installs over USB
 * Requires a LiDAR iPhone (12 Pro or later Pro models) for person detection, iOS 17+.
 * Free Apple ID installs expire after 7 days — re-run `xtool dev` to refresh.
 * In the app, tap ⚙ and enter the laptop's IP (`ip -4 addr`) and port `8000`. Allow **Camera** and **Local Network**.
-* The header shows a green `HUB` when connected; the laptop console shows `PHONE LIVE`. If not, open `http://<laptop-ip>:8000/health` in iPhone Safari to test reachability.
+* The header shows a green `HUB` when connected; the phone appears in the laptop's 3D view. If not, open `http://<laptop-ip>:8000/health` in iPhone Safari to test reachability.
 
 ---
 
-### 3. Open the Laptop AR Console
+### 3. Open the 3D World View
 
-Open your browser on the laptop:
-```
-http://localhost:8000
-```
-*(Or `http://<LAPTOP_LAN_IP>:8000` from another computer on the same network)*
-
-* Click **Start laptop camera** to activate the webcam AR overlay.
-* The console will show:
-  * **AR Webcam Viewport**: Augmented skeleton overlays for every person in the laptop's field of view.
-  * **Top-Down Shared Room Map**: A metric grid showing the live positions of the Laptop (origin `0,0`), moving Phone, and each tracked person.
+Open `http://localhost:8000` on the laptop (or `http://<LAPTOP_LAN_IP>:8000` from another computer).
+It shows every connected phone and everyone they detect, live. Scanning the rooms adds the walls
+(see below).
 
 ---
 
@@ -104,7 +97,7 @@ http://localhost:8000
 
 ![3D world view](docs/images/world-orbit.png)
 
-The laptop becomes a global "god view" at **`http://localhost:8000/world.html`**: a 3D model of the
+The laptop becomes a global "god view" at **`http://localhost:8000`**: a 3D model of the
 rooms, every phone and its view cone, and every person any phone detects. A person seen by
 phone A but hidden by a wall from phone B is drawn through the wall, with a dashed orange line
 and a "behind wall from B" label.
@@ -116,7 +109,7 @@ and a "behind wall from B" label.
 2. **Join from every other phone.** Tap **Join shared map**, then look around a scanned area until
    it says *Relocalized*. Any ARKit iPhone works. Phones without LiDAR estimate distance from body size.
 3. Give each phone its own name in ⚙ settings (e.g. `Helmet-A`, `Helmet-B`).
-4. Open `world.html` on the laptop. Use **Orbit**, **Top-down**, or **👁 Helmet-X** to see exactly what
+4. Open `http://localhost:8000` on the laptop. Use **Orbit**, **Top-down**, or **👁 Helmet-X** to see exactly what
    that phone sees, with walls see-through.
 
 ![Helmet view through a wall](docs/images/world-helmet-view.png)
@@ -151,14 +144,16 @@ on the hub to keep a real scan untouched.
 
 ---
 
-## Calibration & Coordinate Synchronization
+## Without a room scan: Calibrate
 
-1. Hold the phone right beside the laptop's webcam, rear camera facing the same direction as the webcam.
-2. Tap **Calibrate** on the phone, or click **Reset origin (0,0)** on the laptop console (the hub forwards it to the phone, which re-zeros itself).
-3. Both devices are now synchronized to position $(X=0, Z=0)$, heading $0^\circ$ (+Z forward).
-4. Walk around: ARKit tracks the phone in metres, and every detected person is localized with LiDAR depth and streamed to the laptop with a stable `person_NN` id.
+If you haven't scanned the rooms, phones can still share one frame by calibrating at the same spot.
+1. Hold the phone at an agreed spot (e.g. a mark on a table), pointing in an agreed direction, and tap
+   **Calibrate**. That pose becomes the origin $(0,0,0)$, looking down −Z.
+2. Repeat with the other phone at the same spot and direction.
+3. Walk around. ARKit tracks each phone in metres, and people are fused and shown in the 3D view.
 
-If the app is backgrounded, ARKit may restart tracking from a new origin — calibrate again.
+In a shared map, **Leave map & calibrate here** switches back to this mode without restarting the app.
+If the app is backgrounded, ARKit may restart tracking from a new origin, so calibrate again.
 
 ---
 
@@ -175,25 +170,15 @@ If the app is backgrounded, ARKit may restart tracking from a new origin — cal
 │       ├── calibration.py          # Shared coordinate transforms
 │       ├── tracking.py             # Multi-person identity tracking
 │       ├── world.py                # Multi-phone shared-map state & fusion
+│       ├── skeleton.py             # Per-person joint smoothing, hold, rigid limbs
 │       ├── room.py                 # Scanned room model + ARWorldMap storage
 │       ├── simulate_world.py       # Phone-free demo of the 3D world view
 │       ├── localization.py         # Depth sampling & back-projection
 │       ├── camera_calibration.py   # OpenCV checkerboard camera calibrator
 │       └── models.py               # Data schemas
-├── web/                            # Laptop AR Console (HTML/CSS/JS)
-│   ├── world.html / world.js       # 3D world god view (three.js, vendored in web/vendor/)
-│   ├── index.html                  # Laptop-camera AR console
-│   ├── viewer.js                   # Canvas AR overlay & 2D map renderer
-│   └── viewer.css                  # Dark-mode telemetry styling
+├── web/                            # Laptop 3D world view (HTML/CSS/JS)
+│   ├── index.html                  # 3D world god view (default page)
+│   ├── world.js / world.css        # Scene, helmet views, panels
+│   └── vendor/three/               # three.js r186 (MIT), vendored for offline use
 └── tests/                          # Automated coordinate, tracking & hub tests
 ```
-
----
-
-## Camera Calibration (Optional)
-
-For pixel-perfect webcam projection, calibrate your laptop camera using an OpenCV checkerboard:
-```bash
-python3 -m spatial_relay.camera_calibration
-```
-This saves focal length and distortion parameters to `data/laptop_camera.json`, which the web viewer loads automatically.

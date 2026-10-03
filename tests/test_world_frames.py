@@ -17,7 +17,7 @@ from spatial_relay.transforms import Transform
 
 
 def phone_yaw_quat(page_yaw_deg: float) -> np.ndarray:
-    """Exactly mirrors web/phone.js posePacket(): -sin / cos about Y."""
+    """Yaw-only quaternion as sent by phone observers: -sin / cos about Y."""
     rad = math.radians(page_yaw_deg)
     return np.array([0.0, -math.sin(rad / 2), 0.0, math.cos(rad / 2)])
 

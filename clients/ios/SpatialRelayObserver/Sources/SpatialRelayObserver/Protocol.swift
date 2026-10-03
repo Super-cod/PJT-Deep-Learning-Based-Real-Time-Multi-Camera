@@ -1,7 +1,7 @@
 import Foundation
 
 // Packets matching the Python hub's /ws/observer protocol
-// (src/spatial_relay/server.py).
+// (src/spatial_relay/server.py and world.py).
 
 struct LocalPose: Encodable {
     let position: [Float]
@@ -9,48 +9,7 @@ struct LocalPose: Encodable {
     let timestampNs: UInt64
 }
 
-struct CalibrationPacket: Encodable {
-    let type = "calibration"
-    let localPose: LocalPose
-}
-
-struct PosePacket: Encodable {
-    let type = "pose"
-    let sequence: Int
-    let localPose: LocalPose
-}
-
-struct PhoneJoint: Encodable {
-    let name: String
-    let position: [Float]
-    let confidence: Float
-}
-
-struct DetectionPacket: Encodable {
-    let type = "detection"
-    let sequence: Int
-    let subjectId: String
-    let timestampNs: UInt64
-    let positionPhone: [Float]
-    let jointsPhone: [PhoneJoint]
-    let confidence: Float
-}
-
-struct DetectedPerson: Encodable {
-    let positionPhone: [Float]
-    let jointsPhone: [PhoneJoint]
-    let confidence: Float
-}
-
-/// Every person seen in one camera frame; the hub assigns stable ids.
-struct DetectionsPacket: Encodable {
-    let type = "detections"
-    let sequence: Int
-    let timestampNs: UInt64
-    let people: [DetectedPerson]
-}
-
-// ── Shared-map mode: everything is already in the ARWorldMap (world) frame ──
+// ── Phone → hub, in the shared world frame (scanned map or calibrated room) ──
 
 /// First packet after connecting: who this phone is.
 struct HelloPacket: Encodable {
@@ -96,7 +55,7 @@ struct InboundMessage: Decodable {
 
 func nowNs() -> UInt64 { UInt64(Date().timeIntervalSince1970 * 1_000_000_000) }
 
-// ── Hub → phone: fused world (shared-map mode) ─────────────────────────────
+// ── Hub → phone: fused world ───────────────────────────────────────────────
 
 struct WorldPacket: Decodable {
     struct Device: Decodable {
