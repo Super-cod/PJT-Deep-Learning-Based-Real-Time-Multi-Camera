@@ -2,9 +2,9 @@ import math
 import numpy as np
 import pytest
 
-from spatial_relay.calibration import SharedFrameCalibration
-from spatial_relay.models import Pose
-from spatial_relay.transforms import (
+from xenon.calibration import SharedFrameCalibration
+from xenon.models import Pose
+from xenon.transforms import (
     local_to_world,
     world_to_local,
     rotation_matrix_from_yaw,

@@ -1,6 +1,6 @@
 import numpy as np
 
-from spatial_relay.skeleton import SkeletonFilter
+from xenon.skeleton import SkeletonFilter
 
 BODY = {
     "left_hip": [0.12, 0.95, 2.0], "left_knee": [0.13, 0.52, 2.0], "left_ankle": [0.13, 0.10, 2.0],

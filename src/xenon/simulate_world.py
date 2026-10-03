@@ -5,7 +5,7 @@ fake phones in shared-map mode. Phone A stands in room 1 and sees person_01
 walking there; phone B stands in room 2 and sees person_02. Each person is
 therefore "behind a wall" from the other phone.
 
-    PYTHONPATH=src python3 -m spatial_relay.simulate_world --hub http://localhost:8000
+    PYTHONPATH=src python3 -m xenon.simulate_world --hub http://localhost:8000
 """
 from __future__ import annotations
 

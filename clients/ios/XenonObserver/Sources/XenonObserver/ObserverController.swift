@@ -66,7 +66,7 @@ final class ObserverController: NSObject, ObservableObject, ARSessionDelegate {
     private var roomVersionShown = -1
     private var roomLoading = false
     private let worldDecoder = JSONDecoder()
-    private let visionQueue = DispatchQueue(label: "spatialrelay.vision", qos: .userInitiated)
+    private let visionQueue = DispatchQueue(label: "xenon.vision", qos: .userInitiated)
 
     private static let poseInterval: TimeInterval = 1.0 / 25
     private static let detectionInterval: TimeInterval = 1.0 / 20

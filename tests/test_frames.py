@@ -1,5 +1,5 @@
 import numpy as np
-from spatial_relay.frames import canonical_point_to_opencv, opencv_point_to_canonical
+from xenon.frames import canonical_point_to_opencv, opencv_point_to_canonical
 
 
 def test_opencv_canonical_round_trip() -> None:

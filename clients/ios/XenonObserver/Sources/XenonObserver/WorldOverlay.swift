@@ -26,9 +26,7 @@ final class WorldOverlay {
     private var lastScanRender: CFTimeInterval = 0
 
     private static let wallMask = 2
-    private static let colors: [UIColor] = [
-        UIColor(red: 0.73, green: 0.98, blue: 0.35, alpha: 1), .cyan, .orange, .purple, .yellow, .systemPink,
-    ]
+    private static let colors: [UIColor] = Theme.uiTracks
     private static let links: [(String, String)] = [
         ("nose", "left_shoulder"), ("nose", "right_shoulder"),
         ("left_shoulder", "right_shoulder"),
@@ -58,7 +56,7 @@ final class WorldOverlay {
         }
         for door in room.doors ?? [] {
             roomNode.addChildNode(surfaceNode(dimensions: door.dimensions.vec3, transform: Self.matrix(door.transform),
-                                              color: .orange, alpha: 0.18, isWall: false))
+                                              color: Theme.uiAmber, alpha: 0.18, isWall: false))
         }
     }
 
@@ -73,7 +71,7 @@ final class WorldOverlay {
         lastScanRender = now
         scanNode.childNodes.forEach { $0.removeFromParentNode() }
         let groups: [([CapturedRoom.Surface], UIColor, Float)] = [
-            (room.walls, .cyan, 0.30), (room.doors, .orange, 0.55), (room.windows, .systemBlue, 0.55), (room.openings, .green, 0.4),
+            (room.walls, Theme.uiSteel, 0.30), (room.doors, Theme.uiAmber, 0.55), (room.windows, Theme.uiBlue, 0.55), (room.openings, Theme.uiBlue, 0.4),
         ]
         for (surfaces, color, alpha) in groups {
             for s in surfaces {
@@ -235,15 +233,21 @@ final class WorldOverlay {
     }
 
     private static func labelImage(_ text: String, color: UIColor) -> UIImage {
+        let text = text.uppercased()
         let font = UIFont.monospacedSystemFont(ofSize: 34, weight: .semibold)
         let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
         let size = (text as NSString).boundingRect(with: CGSize(width: 2000, height: 400), options: .usesLineFragmentOrigin,
                                                    attributes: attributes, context: nil).size
-        let canvas = CGSize(width: ceil(size.width) + 28, height: ceil(size.height) + 16)
+        let canvas = CGSize(width: ceil(size.width) + 40, height: ceil(size.height) + 16)
         return UIGraphicsImageRenderer(size: canvas).image { ctx in
-            UIColor(white: 0.03, alpha: 0.78).setFill()
-            UIBezierPath(roundedRect: CGRect(origin: .zero, size: canvas), cornerRadius: 12).fill()
-            (text as NSString).draw(with: CGRect(x: 14, y: 8, width: size.width, height: size.height),
+            // Square tactical tag: dark plate, thin border, colour bar on the left.
+            Theme.rgb(0x111418).withAlphaComponent(0.88).setFill()
+            ctx.fill(CGRect(origin: .zero, size: canvas))
+            Theme.rgb(0x404854).setStroke()
+            ctx.stroke(CGRect(origin: .zero, size: canvas).insetBy(dx: 1, dy: 1))
+            color.setFill()
+            ctx.fill(CGRect(x: 0, y: 0, width: 8, height: canvas.height))
+            (text as NSString).draw(with: CGRect(x: 22, y: 8, width: size.width, height: size.height),
                                     options: .usesLineFragmentOrigin, attributes: attributes, context: nil)
         }
     }
@@ -389,7 +393,7 @@ private final class PersonNode {
         labelText = text
         let position = label?.simdPosition
         label?.removeFromParentNode()
-        let node = WorldOverlay.labelNode(text, color: warning ? .orange : color)
+        let node = WorldOverlay.labelNode(text, color: warning ? Theme.uiRed : color)
         if let position { node.simdPosition = position }
         label = node
         root.addChildNode(node)

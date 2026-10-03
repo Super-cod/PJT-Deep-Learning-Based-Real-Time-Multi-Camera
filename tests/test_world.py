@@ -6,8 +6,8 @@ import json
 import numpy as np
 import pytest
 
-from spatial_relay.room import RoomStore
-from spatial_relay.world import ReportedPerson, WorldState, fuse
+from xenon.room import RoomStore
+from xenon.world import ReportedPerson, WorldState, fuse
 
 
 def person(x: float, z: float, conf: float = 0.9, joints: dict | None = None) -> dict:
@@ -100,7 +100,7 @@ def test_room_store_round_trip(tmp_path) -> None:
 
 def test_hub_routes_two_phones_and_serves_room(tmp_path) -> None:
     testclient = pytest.importorskip("fastapi.testclient")
-    from spatial_relay import server as server_mod
+    from xenon import server as server_mod
 
     server_mod.hub = server_mod.RelayHub()
     server_mod.hub.rooms = RoomStore(tmp_path)
@@ -127,7 +127,7 @@ def test_hub_routes_two_phones_and_serves_room(tmp_path) -> None:
 
 def test_shared_map_phone_receives_world_packets(tmp_path) -> None:
     testclient = pytest.importorskip("fastapi.testclient")
-    from spatial_relay import server as server_mod
+    from xenon import server as server_mod
 
     server_mod.hub = server_mod.RelayHub()
     server_mod.hub.rooms = RoomStore(tmp_path)

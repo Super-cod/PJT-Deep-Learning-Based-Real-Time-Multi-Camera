@@ -24,7 +24,7 @@ from .world import WorldState
 
 WORLD_TICK_HZ = 15
 
-log = logging.getLogger("spatial_relay")
+log = logging.getLogger("xenon")
 SEND_TIMEOUT_S = 0.5
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
@@ -349,7 +349,7 @@ async def lifespan(_: FastAPI):
         task.cancel()
 
 
-app = FastAPI(title="Spatial Relay Hub", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Xenon Hub", version="0.1.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 @app.get("/health")

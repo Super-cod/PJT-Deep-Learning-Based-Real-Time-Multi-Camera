@@ -1,9 +1,9 @@
 import numpy as np
 
-from spatial_relay.models import CameraIntrinsics, Pose
-from spatial_relay.localization import back_project, median_depth_m
-from spatial_relay.transforms import Transform
-from spatial_relay.calibration import SharedFrameCalibration
+from xenon.models import CameraIntrinsics, Pose
+from xenon.localization import back_project, median_depth_m
+from xenon.transforms import Transform
+from xenon.calibration import SharedFrameCalibration
 
 
 def test_transform_round_trip() -> None:

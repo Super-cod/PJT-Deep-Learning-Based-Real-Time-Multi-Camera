@@ -10,8 +10,8 @@ import asyncio
 
 import pytest
 
-from spatial_relay.calibration import Device
-from spatial_relay.server import RelayHub
+from xenon.calibration import Device
+from xenon.server import RelayHub
 
 def quat(yaw_deg: float = 0.0) -> list[float]:
     import math
@@ -96,7 +96,7 @@ class TestHubReportsPhoneStatus:
         assert len(hub.anchors) == 1
 
     def test_health_reports_pose_liveness(self) -> None:
-        from spatial_relay import server as server_mod
+        from xenon import server as server_mod
 
         # `health()` reads the module-level hub, so swap it rather than using a
         # locally constructed instance.
@@ -114,7 +114,7 @@ class TestHubReportsPhoneStatus:
         assert health["poseAgeS"] is not None
 
     def test_health_without_poses_is_not_live(self) -> None:
-        from spatial_relay import server as server_mod
+        from xenon import server as server_mod
 
         original = server_mod.hub
         hub, _ = self._hub_with_viewer()

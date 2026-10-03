@@ -1,6 +1,6 @@
 import numpy as np
 
-from spatial_relay.tracking import PersonTracker
+from xenon.tracking import PersonTracker
 
 
 def test_ids_stay_stable_when_detection_order_swaps():

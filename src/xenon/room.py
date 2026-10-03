@@ -12,8 +12,8 @@ import json
 import os
 from pathlib import Path
 
-# Override with SPATIAL_RELAY_ROOM_DIR (e.g. for demos) to keep a real scan untouched.
-DEFAULT_DIR = Path(os.environ.get("SPATIAL_RELAY_ROOM_DIR") or Path(__file__).resolve().parents[2] / "data" / "room")
+# Override with XENON_ROOM_DIR (e.g. for demos) to keep a real scan untouched.
+DEFAULT_DIR = Path(os.environ.get("XENON_ROOM_DIR") or Path(__file__).resolve().parents[2] / "data" / "room")
 MAX_ROOM_BYTES = 5 * 1024 * 1024
 MAX_WORLDMAP_BYTES = 100 * 1024 * 1024
 

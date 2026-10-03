@@ -38,7 +38,7 @@ def calibrate_webcam(camera_index: int = 0, board: tuple[int, int] = (9, 6), req
                 corners = cv2.cornerSubPix(gray, corners, (11,11), (-1,-1), (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, .001))
                 cv2.drawChessboardCorners(shown, board, corners, found)
             cv2.putText(shown, f"{len(images)}/{required_frames}: space capture, q quit", (12, 30), cv2.FONT_HERSHEY_SIMPLEX, .65, (0,255,0), 2)
-            cv2.imshow("Spatial Relay camera calibration", shown)
+            cv2.imshow("Xenon camera calibration", shown)
             key = cv2.waitKey(1) & 0xff
             if key == ord("q"): return
             if key == ord(" ") and found: objects.append(obj); images.append(corners)

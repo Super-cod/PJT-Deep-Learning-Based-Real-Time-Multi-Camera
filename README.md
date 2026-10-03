@@ -1,4 +1,4 @@
-# Spatial Relay
+# Xenon
 
 Processing hub and demonstrator for **deep-learning-based real-time multi-camera human localization and AR-assisted situational awareness**. The system synchronizes multiple observer viewpoints into a single unified 3D room coordinate system: iPhones act as helmet-mounted observers that track themselves with ARKit and localize every person they see in 3D with LiDAR; a Python hub fuses all phones in one shared frame and tracks people with stable ids; the laptop shows a live 3D world view of the scanned rooms, phones and people, including people hidden behind walls.
 
@@ -35,15 +35,15 @@ Processing hub and demonstrator for **deep-learning-based real-time multi-camera
 
 | Module | Description | Implementation |
 |---|---|---|
-| **M1 Acquisition Contract** | Timestamped pose, 3D metric joints and detection packets | `src/spatial_relay/models.py`, `clients/ios/.../Protocol.swift` |
+| **M1 Acquisition Contract** | Timestamped pose, 3D metric joints and detection packets | `src/xenon/models.py`, `clients/ios/.../Protocol.swift` |
 | **M2 Deep Pose Estimation** | On-device human body pose (Apple Vision, multi-person) | `clients/ios/.../ObserverController.swift` |
-| **M3 3D Metric Localization** | LiDAR depth sampling + pinhole back-projection per joint | `ObserverController.swift`, `src/spatial_relay/localization.py` |
-| **M4 Shared Frame Calibration**| Rigid coordinate transforms mapping phone and laptop into world $W$ | `src/spatial_relay/calibration.py`, `RoomFrame.swift` |
-| **M4b Multi-Person Tracking** | Stable `person_NN` ids across frames (nearest-neighbour + 1-euro smoothing) | `src/spatial_relay/tracking.py` |
-| **M5 Real-Time Relay** | FastAPI WebSocket server broadcasting at 25 FPS | `src/spatial_relay/server.py` |
-| **M8 Room Model & Shared Map** | RoomPlan multi-room scan + ARWorldMap relocalization | `RoomScanner.swift`, `src/spatial_relay/room.py` |
-| **M9 Multi-Phone Fusion** | Cross-camera person fusion + 15 Hz world packet | `src/spatial_relay/world.py` |
-| **M11 Body Model** | Person-segmented LiDAR depth, 19 joints, per-joint 1-euro smoothing, learned rigid limb lengths, mannequin rendering | `ObserverController.swift`, `src/spatial_relay/skeleton.py` |
+| **M3 3D Metric Localization** | LiDAR depth sampling + pinhole back-projection per joint | `ObserverController.swift`, `src/xenon/localization.py` |
+| **M4 Shared Frame Calibration**| Rigid coordinate transforms mapping phone and laptop into world $W$ | `src/xenon/calibration.py`, `RoomFrame.swift` |
+| **M4b Multi-Person Tracking** | Stable `person_NN` ids across frames (nearest-neighbour + 1-euro smoothing) | `src/xenon/tracking.py` |
+| **M5 Real-Time Relay** | FastAPI WebSocket server broadcasting at 25 FPS | `src/xenon/server.py` |
+| **M8 Room Model & Shared Map** | RoomPlan multi-room scan + ARWorldMap relocalization | `RoomScanner.swift`, `src/xenon/room.py` |
+| **M9 Multi-Phone Fusion** | Cross-camera person fusion + 15 Hz world packet | `src/xenon/world.py` |
+| **M11 Body Model** | Person-segmented LiDAR depth, 19 joints, per-joint 1-euro smoothing, learned rigid limb lengths, mannequin rendering | `ObserverController.swift`, `src/xenon/skeleton.py` |
 | **M10 3D World View** | three.js god view, helmet views, through-wall sight lines | `web/index.html`, `web/world.js` |
 | **M7 Visual-Inertial Odometry** | ARKit world tracking, gravity aligned | `ObserverController.swift` |
 
@@ -61,7 +61,7 @@ pip install -r requirements.txt
 pip install -e .
 
 # Run the hub server on your LAN:
-PYTHONPATH=src python3 -m uvicorn spatial_relay.server:app --host 0.0.0.0 --port 8000 --reload
+PYTHONPATH=src python3 -m uvicorn xenon.server:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 The hub is now active on port `8000`. You can verify health at `http://localhost:8000/health`.
@@ -70,10 +70,10 @@ The hub is now active on port `8000`. You can verify health at `http://localhost
 
 ### 2. Install the iPhone Observer App
 
-The observer is a native Swift app (ARKit + LiDAR + Apple Vision), built and installed **from Linux with a free Apple ID** using [xtool](https://github.com/xtool-org/xtool). One-time setup (Swift toolchain, Xcode.xip SDK, `xtool auth`) is in [`clients/ios/SpatialRelayObserver/README.md`](clients/ios/SpatialRelayObserver/README.md).
+The observer is a native Swift app (ARKit + LiDAR + Apple Vision), built and installed **from Linux with a free Apple ID** using [xtool](https://github.com/xtool-org/xtool). One-time setup (Swift toolchain, Xcode.xip SDK, `xtool auth`) is in [`clients/ios/XenonObserver/README.md`](clients/ios/XenonObserver/README.md).
 
 ```bash
-cd clients/ios/SpatialRelayObserver
+cd clients/ios/XenonObserver
 . ~/.local/share/swiftly/env.sh
 xtool dev        # builds, signs and installs over USB
 ```
@@ -102,11 +102,11 @@ rooms, every phone and its view cone, and every person any phone detects. A pers
 phone A but hidden by a wall from phone B is drawn through the wall, with a dashed orange line
 and a "behind wall from B" label.
 
-1. **Scan the rooms (LiDAR iPhone, once).** Tap **Scan rooms**, walk each room slowly, then
+1. **Scan the rooms (LiDAR iPhone, once).** Tap **Scan**, walk each room slowly, then
    **Finish this room**. Tap **Next room** and walk through the doorway for the next one. Finally tap
    **Save & share**. RoomPlan's walls, doors, windows and furniture, plus the ARKit world map, are
    uploaded to the hub (`data/room/`).
-2. **Join from every other phone.** Tap **Join shared map**, then look around a scanned area until
+2. **Join from every other phone.** Tap **Join map**, then look around a scanned area until
    it says *Relocalized*. Any ARKit iPhone works. Phones without LiDAR estimate distance from body size.
 3. Give each phone its own name in ⚙ settings (e.g. `Helmet-A`, `Helmet-B`).
 4. Open `http://localhost:8000` on the laptop. Use **Orbit**, **Top-down**, or **👁 Helmet-X** to see exactly what
@@ -137,9 +137,9 @@ phone's camera view.
 
 **Demo without phones:**
 ```bash
-PYTHONPATH=src python3 -m spatial_relay.simulate_world --hub http://localhost:8000
+PYTHONPATH=src python3 -m xenon.simulate_world --hub http://localhost:8000
 ```
-This uploads a synthetic 2-room scan and streams two walking helmets. Set `SPATIAL_RELAY_ROOM_DIR`
+This uploads a synthetic 2-room scan and streams two walking helmets. Set `XENON_ROOM_DIR`
 on the hub to keep a real scan untouched.
 
 ---
@@ -162,10 +162,10 @@ If the app is backgrounded, ARKit may restart tracking from a new origin, so cal
 ```
 .
 ├── clients/
-│   ├── ios/SpatialRelayObserver/   # Native Swift ARKit + LiDAR observer (xtool, builds on Linux)
+│   ├── ios/XenonObserver/   # Native Swift ARKit + LiDAR observer (xtool, builds on Linux)
 │   └── unity/                      # Unity ARCore receiver client
 ├── src/
-│   └── spatial_relay/              # Python processing hub
+│   └── xenon/              # Python processing hub
 │       ├── server.py               # FastAPI WebSocket server & packet relay
 │       ├── calibration.py          # Shared coordinate transforms
 │       ├── tracking.py             # Multi-person identity tracking

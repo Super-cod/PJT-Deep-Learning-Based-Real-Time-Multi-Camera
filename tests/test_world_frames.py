@@ -11,9 +11,9 @@ import math
 
 import numpy as np
 
-from spatial_relay.calibration import SharedFrameCalibration
-from spatial_relay.models import Pose
-from spatial_relay.transforms import Transform
+from xenon.calibration import SharedFrameCalibration
+from xenon.models import Pose
+from xenon.transforms import Transform
 
 
 def phone_yaw_quat(page_yaw_deg: float) -> np.ndarray:

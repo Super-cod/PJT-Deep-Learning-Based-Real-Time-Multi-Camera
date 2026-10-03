@@ -14,8 +14,8 @@ import sys
 
 import pytest
 
-from spatial_relay.calibration import Device
-from spatial_relay.server import RelayHub
+from xenon.calibration import Device
+from xenon.server import RelayHub
 
 websockets = pytest.importorskip("websockets")
 
@@ -55,7 +55,7 @@ def pose_packet(position, yaw_deg: float = 0.0) -> dict:
 
 def drive_observer(packets: list[dict]) -> FakeSocket:
     """Run the real observer handler over a scripted packet sequence."""
-    from spatial_relay import server as server_mod
+    from xenon import server as server_mod
 
     socket = FakeSocket(packets, disconnect_after=True)
     server_mod.hub = RelayHub()
@@ -85,7 +85,7 @@ def test_unknown_type_does_not_close_the_socket() -> None:
 
 
 def test_disconnect_flag_is_cleared() -> None:
-    from spatial_relay import server as server_mod
+    from xenon import server as server_mod
 
     async def scenario():
         server_mod.hub = RelayHub()
@@ -105,7 +105,7 @@ def _subprocess_env() -> dict:
     """Env for the spawned server.
 
     `pythonpath = ["src"]` in pyproject.toml only patches the pytest process's
-    `sys.path`; a subprocess does not inherit that, so `spatial_relay` would be
+    `sys.path`; a subprocess does not inherit that, so `xenon` would be
     unimportable and the server would silently fail to start.
     """
     import os
@@ -120,7 +120,7 @@ def _subprocess_env() -> dict:
 
 def test_live_socket_rejects_a_bad_packet_without_dying() -> None:
     server = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "spatial_relay.server:app",
+        [sys.executable, "-m", "uvicorn", "xenon.server:app",
          "--host", "127.0.0.1", "--port", str(PORT), "--log-level", "warning"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         env=_subprocess_env(),

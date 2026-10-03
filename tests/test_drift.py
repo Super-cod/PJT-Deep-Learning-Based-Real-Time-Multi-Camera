@@ -1,8 +1,8 @@
 import numpy as np
 import time
 
-from spatial_relay.drift import DriftCorrector
-from spatial_relay.transforms import Transform
+from xenon.drift import DriftCorrector
+from xenon.transforms import Transform
 
 
 class TestDriftCorrector:

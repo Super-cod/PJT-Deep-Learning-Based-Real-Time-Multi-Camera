@@ -1,7 +1,7 @@
 import Foundation
 
 // Packets matching the Python hub's /ws/observer protocol
-// (src/spatial_relay/server.py and world.py).
+// (src/xenon/server.py and world.py).
 
 struct LocalPose: Encodable {
     let position: [Float]

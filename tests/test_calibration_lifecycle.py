@@ -12,10 +12,10 @@ import math
 import numpy as np
 import pytest
 
-from spatial_relay.calibration import Device, SharedFrameCalibration
-from spatial_relay.models import Pose
-from spatial_relay.server import RelayHub
-from spatial_relay.transforms import Transform
+from xenon.calibration import Device, SharedFrameCalibration
+from xenon.models import Pose
+from xenon.server import RelayHub
+from xenon.transforms import Transform
 
 
 def phone_yaw_quat(yaw_deg: float) -> list[float]:

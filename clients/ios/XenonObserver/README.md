@@ -1,4 +1,4 @@
-# Spatial Relay — Native iOS Observer (Swift, ARKit + LiDAR)
+# Xenon — Native iOS Observer (Swift, ARKit + LiDAR)
 
 Native observer for LiDAR iPhones (12 Pro and later Pro models, e.g. iPhone 15 Pro):
 
@@ -38,7 +38,7 @@ It is a plain SwiftPM package built with **[xtool](https://github.com/xtool-org/
 ## Build & install
 
 ```bash
-cd clients/ios/SpatialRelayObserver
+cd clients/ios/XenonObserver
 xtool dev
 ```
 
@@ -58,18 +58,18 @@ If signing fails because the bundle ID is taken, change `bundleID` in `xtool.yml
 
 ## Using it
 
-1. Start the hub on the laptop: `PYTHONPATH=src python3 -m uvicorn spatial_relay.server:app --host 0.0.0.0 --port 8000` and open `http://localhost:8000`.
-2. Either scan + share the rooms / **Join shared map** (see below), or hold each phone at the same agreed spot and direction and tap **Calibrate**.
+1. Start the hub on the laptop: `PYTHONPATH=src python3 -m uvicorn xenon.server:app --host 0.0.0.0 --port 8000` and open `http://localhost:8000`.
+2. Either scan + share the rooms / **Join map** (see below), or hold each phone at the same agreed spot and direction and tap **Calibrate**.
 3. Walk around. The phone streams its pose at 25 Hz and person detections at ~20 Hz. Filled joint dots have a depth and are sent; hollow red dots had no valid depth.
 
 If the app is backgrounded, ARKit may restart tracking from a new origin — calibrate again.
 
 ## Shared map mode (several phones, 3D world view)
 
-- **Scan rooms** (LiDAR only): RoomPlan captures each room on the app's own ARSession. Use
+- **Scan** (LiDAR only): RoomPlan captures each room on the app's own ARSession. Use
   **Finish this room**, then **Next room**, then **Save & share**. This uploads the room model
   (`POST /api/room`) and the ARWorldMap (`POST /api/worldmap`).
-- **Join shared map** (any ARKit iPhone): downloads the map and relocalizes. After that, poses and
+- **Join map** (any ARKit iPhone): downloads the map and relocalizes. After that, poses and
   people are sent in the shared frame (`frame: "map"`), and the laptop's world view (`http://<laptop>:8000`) shows everyone.
 - Without LiDAR, each person's depth is estimated from their torso length (about 0.5 m), at roughly
   ±20–30% accuracy.
@@ -81,8 +81,8 @@ If the app is backgrounded, ARKit may restart tracking from a new origin — cal
 ## Code
 
 ```
-Sources/SpatialRelayObserver/
-├── SpatialRelayObserverApp.swift   SwiftUI UI, AR camera view, skeleton overlay, settings
+Sources/XenonObserver/
+├── XenonObserverApp.swift   SwiftUI UI, AR camera view, skeleton overlay, settings
 ├── ObserverController.swift        ARSession, modes (calibrated / scanning / relocalizing / shared map), Vision + depth
 ├── RoomScanner.swift               RoomPlan multi-room scan → compact room JSON
 ├── WorldOverlay.swift              SceneKit AR: remote people (x-ray), other phones, walls, live scan

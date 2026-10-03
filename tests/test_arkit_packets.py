@@ -14,8 +14,8 @@ import math
 
 import pytest
 
-from spatial_relay.calibration import Device
-from spatial_relay.server import RelayHub
+from xenon.calibration import Device
+from xenon.server import RelayHub
 
 websockets = pytest.importorskip("websockets")
 
@@ -52,7 +52,7 @@ class FakeSocket:
 
 
 def drive(packets: list[dict]) -> FakeSocket:
-    from spatial_relay import server as server_mod
+    from xenon import server as server_mod
 
     socket = FakeSocket(packets)
     server_mod.hub = RelayHub()
@@ -220,7 +220,7 @@ class TestViewerConnectSnapshot:
             self.packets.append(packet)
 
     def test_new_viewer_is_told_the_pose_source_and_tracking(self) -> None:
-        from spatial_relay import server as server_mod
+        from xenon import server as server_mod
 
         original = server_mod.hub
         hub = RelayHub()

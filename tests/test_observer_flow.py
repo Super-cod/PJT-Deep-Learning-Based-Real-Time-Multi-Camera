@@ -16,9 +16,9 @@ import math
 
 import pytest
 
-from spatial_relay.calibration import Device
-from spatial_relay.models import Pose
-from spatial_relay.server import RelayHub
+from xenon.calibration import Device
+from xenon.models import Pose
+from xenon.server import RelayHub
 
 
 def quat(yaw_deg: float) -> list[float]:

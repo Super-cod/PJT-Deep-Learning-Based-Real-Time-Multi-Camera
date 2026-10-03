@@ -19,8 +19,11 @@ const SKELETON_LINKS = [
   ['left_hip', 'left_knee'], ['left_knee', 'left_ankle'],
   ['right_hip', 'right_knee'], ['right_knee', 'right_ankle'],
 ];
-const PERSON_COLORS = [0xbafa59, 0x55dfcf, 0xff8452, 0xc792ea, 0xffd166, 0xff6b9a];
-const DEVICE_COLORS = [0x4fc3f7, 0xf06292, 0xffb74d, 0x81c784, 0x9575cd];
+// Tracks (people) in warm tactical tones, assets (phones) in friendly blues.
+const PERSON_COLORS = [0xec9a3c, 0xf0b726, 0xe76a6e, 0xd69fd6, 0x2ee6d6, 0x72ca9b];
+const DEVICE_COLORS = [0x4c90f0, 0x8abbff, 0x3fa6da, 0x9d8ff0, 0x68c1ee];
+const OCCLUDED = 0xe76a6e;
+const BG = 0x0d1014;
 // iPhone wide camera field of view (degrees) along the image's long / short side.
 const PHONE_FOV_LONG = 69;
 const PHONE_FOV_SHORT = 54;
@@ -28,7 +31,7 @@ const PHONE_FOV_SHORT = 54;
 // +90° roll about the viewing axis turns them into an upright portrait view.
 const PORTRAIT_ROLL = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI / 2);
 const ORBIT_FOV = 60;
-const SURFACE_COLORS = { wall: 0x9fb8c8, door: 0xff8452, window: 0x55dfcf, opening: 0x55dfcf };
+const SURFACE_COLORS = { wall: 0x8f99a8, door: 0xec9a3c, window: 0x4c90f0, opening: 0x4c90f0 };
 
 function colorFor(palette, key) {
   let h = 0;
@@ -43,8 +46,9 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 $('scene').appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x05090e);
-scene.add(new THREE.HemisphereLight(0xdfefff, 0x0b1218, 1.1));
+scene.background = new THREE.Color(BG);
+scene.fog = new THREE.Fog(BG, 18, 45);
+scene.add(new THREE.HemisphereLight(0xdfe7f2, 0x0d1014, 1.1));
 const sun = new THREE.DirectionalLight(0xffffff, 0.8);
 sun.position.set(4, 10, 6);
 scene.add(sun);
@@ -54,7 +58,7 @@ camera.position.set(6, 7, 8);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 
-const grid = new THREE.GridHelper(30, 30, 0x1f3442, 0x13212c);
+const grid = new THREE.GridHelper(30, 60, 0x2f343c, 0x1a1f25);
 scene.add(grid);
 scene.add(new THREE.AxesHelper(0.5));
 
@@ -76,18 +80,23 @@ resize();
 
 // ── Text labels (sprites) ────────────────────────────────────────────────────
 const LABEL_HEIGHT = 0.032; // fraction of the viewport height
-function makeLabel(text, color = '#e3edf2') {
+function makeLabel(text, color = '#f6f7f9') {
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
-  const font = '600 28px ui-monospace, Menlo, monospace';
+  const font = '600 26px ui-monospace, "SF Mono", Menlo, monospace';
+  const shown = text.toUpperCase();
   ctx.font = font;
-  canvas.width = Math.ceil(ctx.measureText(text).width) + 24;
+  canvas.width = Math.ceil(ctx.measureText(shown).width) + 34;
   canvas.height = 44;
   ctx.font = font;
-  ctx.fillStyle = 'rgba(5, 9, 14, 0.75)';
+  ctx.fillStyle = 'rgba(17, 20, 24, 0.88)';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.strokeStyle = 'rgba(64, 72, 84, 0.9)';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(1, 1, canvas.width - 2, canvas.height - 2);
   ctx.fillStyle = color;
-  ctx.fillText(text, 12, 31);
+  ctx.fillRect(0, 0, 6, canvas.height);
+  ctx.fillText(shown, 18, 31);
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   // Constant on-screen size, so labels stay readable in orbit and helmet views alike.
@@ -168,7 +177,7 @@ function addFloor(s) {
     geometry = new THREE.PlaneGeometry(s.dimensions[0], s.dimensions[1]);
   }
   const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({
-    color: 0x1b2d3a, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false,
+    color: 0x1c2127, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false,
   }));
   mesh.matrixAutoUpdate = false;
   mesh.matrix.copy(matrixFrom(s.transform));
@@ -178,12 +187,12 @@ function addFloor(s) {
 function addObject(o) {
   const geometry = new THREE.BoxGeometry(...o.dimensions.map(d => Math.max(d, 0.02)));
   const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({
-    color: 0x51606b, transparent: true, opacity: 0.35, depthWrite: false,
+    color: 0x404854, transparent: true, opacity: 0.35, depthWrite: false,
   }));
   mesh.matrixAutoUpdate = false;
   mesh.matrix.copy(matrixFrom(o.transform));
-  mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(geometry), new THREE.LineBasicMaterial({ color: 0x7d93a1 })));
-  const label = makeLabel(o.category, '#9fb0bb');
+  mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(geometry), new THREE.LineBasicMaterial({ color: 0x8f99a8 })));
+  const label = makeLabel(o.category, '#8f99a8');
   label.position.set(0, o.dimensions[1] / 2 + 0.12, 0);
   label.scale.multiplyScalar(0.7);
   mesh.add(label);
@@ -216,9 +225,12 @@ async function loadRoom(version) {
       if (viewMode !== 'follow') fitView(box);
     }
     roomVersion = version;
-    $('roomInfo').innerHTML =
-      `${room.rooms ?? 1} room(s) · ${(room.walls || []).length} walls · ${(room.doors || []).length} doors · ` +
-      `${(room.windows || []).length} windows · ${(room.objects || []).length} objects`;
+    const stat = (k, v) => `<span class="kv"><span>${k}</span><b>${v}</b></span>`;
+    $('roomInfo').innerHTML = [
+      stat('ROOMS', room.rooms ?? 1), stat('WALLS', (room.walls || []).length),
+      stat('DOORS', (room.doors || []).length), stat('WINDOWS', (room.windows || []).length),
+      stat('OBJECTS', (room.objects || []).length),
+    ].join('<br>');
   } catch (err) {
     console.warn('room load failed', err);
   } finally {
@@ -315,7 +327,7 @@ function makePerson(id) {
     return mesh;
   };
   const ring = new THREE.Mesh(
-    new THREE.RingGeometry(0.22, 0.26, 32),
+    new THREE.RingGeometry(0.24, 0.27, 4, 1, Math.PI / 4),
     new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide, transparent: true, opacity: 0.8 }),
   );
   ring.rotation.x = -Math.PI / 2;
@@ -432,7 +444,7 @@ function updatePeople(people, devices) {
       const blocked = !sees && wallBetween(from, target);
       if (blocked) hiddenFrom.push(dev.name);
       if (!sees && !blocked) return;
-      const color = sees ? node.userData.color : 0xff8452;  // dashed orange = through a wall
+      const color = sees ? node.userData.color : OCCLUDED;  // dashed red = through a wall
       const material = sees
         ? new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.55 })
         : new THREE.LineDashedMaterial({ color, dashSize: 0.15, gapSize: 0.1, depthTest: false, transparent: true });
@@ -444,8 +456,8 @@ function updatePeople(people, devices) {
 
     const hex = '#' + node.userData.color.toString(16).padStart(6, '0');
     setLabel(node.userData.labelHolder,
-      hiddenFrom.length ? `${person.id} · behind wall from ${hiddenFrom.join(', ')}` : person.id,
-      hiddenFrom.length ? '#ff8452' : hex);
+      hiddenFrom.length ? `${person.id} · occluded · ${hiddenFrom.join(', ')}` : person.id,
+      hiddenFrom.length ? '#e76a6e' : hex);
     rows.push({ person, hex, hiddenFrom, devices });
   });
 
@@ -478,29 +490,35 @@ function renderPeopleList(rows) {
   if (now - lastPeopleRender < 250 && Number($('peopleCount').textContent) === rows.length) return;
   lastPeopleRender = now;
   $('peopleCount').textContent = rows.length;
+  $('statTracks').textContent = rows.length;
+  $('statOccluded').textContent = rows.filter(r => r.hiddenFrom.length).length;
   setHtml('people', rows.length ? rows.map(({ person, hex, hiddenFrom, devices }) => `
-    <li>
-      <span class="dot" style="background:${hex}"></span><span class="name">${person.id}</span>
-      <div class="sub">X Y Z ${fmt(person.position)}</div>
-      <div class="sub">seen by ${person.seenBy.map(id => nameOf(devices, id)).join(', ')}</div>
-      ${hiddenFrom.length ? `<div class="warn">behind a wall from ${hiddenFrom.join(', ')}</div>` : ''}
-    </li>`).join('') : '<li class="empty">Nobody detected</li>');
+    <li style="--li:${hex}" class="${hiddenFrom.length ? 'alert' : ''}">
+      <div class="head"><span class="name"><span class="dot" style="background:${hex}"></span>${person.id}</span>
+        <span class="tag ${hiddenFrom.length ? 'hidden' : 'vis'}">${hiddenFrom.length ? 'Occluded' : 'Visual'}</span></div>
+      <div class="sub">POS <b>${fmt(person.position)}</b></div>
+      <div class="sub">SRC <b>${person.seenBy.map(id => nameOf(devices, id)).join(', ').toUpperCase()}</b></div>
+      ${hiddenFrom.length ? `<div class="warn">▲ BEHIND WALL FROM ${hiddenFrom.join(', ').toUpperCase()}</div>` : ''}
+    </li>`).join('') : '<li class="empty">No tracks</li>');
 }
 
 function renderDeviceList(devices) {
-  $('deviceCount').textContent = devices.filter(d => d.online).length;
+  const online = devices.filter(d => d.online).length;
+  $('deviceCount').textContent = online;
+  $('statAssets').textContent = online;
   setHtml('devices', devices.length ? devices.map(d => {
     const hex = '#' + colorFor(DEVICE_COLORS, d.id).toString(16).padStart(6, '0');
     return `
-    <li>
-      <span class="dot" style="background:${d.online ? hex : '#3a4a55'}"></span><span class="name">${d.name}</span>
-      <div class="sub">${d.online ? 'online' : 'offline'} · ${d.hasLidar ? 'LiDAR' : 'no LiDAR (estimated depth)'}</div>
-      <div class="sub">${d.online ? `sees ${d.peopleSeen}` : ''}</div>
+    <li style="--li:${d.online ? hex : '#404854'}">
+      <div class="head"><span class="name"><span class="dot" style="background:${d.online ? hex : '#404854'}"></span>${d.name}</span>
+        <span class="tag ${d.online ? 'ok' : 'off'}">${d.online ? 'Online' : 'Offline'}</span></div>
+      <div class="sub">SENSOR <b>${d.hasLidar ? 'LIDAR' : 'MONO (EST. DEPTH)'}</b></div>
+      ${d.online ? `<div class="sub">CONTACTS <b>${d.peopleSeen}</b></div>` : ''}
     </li>`;
-  }).join('') : '<li class="empty">No phones connected</li>');
+  }).join('') : '<li class="empty">No assets online</li>');
 
   setHtml('followButtons', devices.filter(d => d.online).map(d =>
-    `<button data-follow="${d.id}" class="${viewMode === 'follow' && followId === d.id ? 'active' : ''}">👁 ${d.name}</button>`,
+    `<button data-follow="${d.id}" class="${viewMode === 'follow' && followId === d.id ? 'active' : ''}">◉ ${d.name}</button>`,
   ).join(''));
 }
 
@@ -526,6 +544,9 @@ function setView(mode, id = null) {
   controls.enabled = mode !== 'follow';
   document.querySelectorAll('#viewButtons button').forEach(b => b.classList.toggle('active', b.dataset.view === mode));
   document.querySelectorAll('#followButtons button').forEach(b => b.classList.toggle('active', mode === 'follow' && b.dataset.follow === id));
+  document.body.classList.toggle('helmet', mode === 'follow');
+  const name = lastDevices.find(d => d.id === id)?.name ?? id;
+  $('viewTag').textContent = mode === 'follow' ? `● HELMET FEED // ${String(name).toUpperCase()}` : mode === 'top' ? 'VIEW // PLAN' : 'VIEW // 3D ORBIT';
   if (mode !== 'follow') {
     const box = new THREE.Box3().setFromObject(roomGroup);
     fitView(box.isEmpty() ? new THREE.Box3(new THREE.Vector3(-3, 0, -3), new THREE.Vector3(3, 2, 3)) : box);
@@ -543,8 +564,17 @@ $('followButtons').onclick = e => {
 let lastWorldAt = 0;
 let lastDevices = [];
 
+let packetCount = 0;
+setInterval(() => { $('statRate').textContent = `${packetCount} Hz`; packetCount = 0; }, 1000);
+setInterval(() => { $('clock').textContent = new Date().toISOString().slice(11, 19); }, 250);
+
 function onWorld(packet) {
+  packetCount += 1;
   lastWorldAt = performance.now();
+  if (!$('hubStatus').classList.contains('live')) {
+    $('hubStatus').textContent = 'HUB LINK';
+    $('hubStatus').classList.add('live');
+  }
   lastDevices = packet.devices;
   if (packet.roomVersion !== roomVersion) loadRoom(packet.roomVersion);
   updateDevices(packet.devices);
@@ -554,7 +584,7 @@ function onWorld(packet) {
 
 function connect() {
   const socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/viewer`);
-  socket.onopen = () => { $('hubStatus').textContent = 'HUB CONNECTED'; $('hubStatus').classList.add('live'); };
+  socket.onopen = () => { $('hubStatus').textContent = 'HUB LINK'; $('hubStatus').classList.add('live'); };
   socket.onmessage = e => {
     let p;
     try { p = JSON.parse(e.data); } catch { return; }
@@ -571,10 +601,11 @@ function connect() {
 // Helmet view: render exactly what the phone sees, upright, in a portrait 3:4
 // frame (the phone camera's aspect) centred in the area left of the side panel.
 function renderHelmetView(node) {
+  // Fit the portrait frame inside the HUD area (between panels and bars).
   const W = window.innerWidth, H = window.innerHeight;
-  const panel = window.innerWidth > 720 ? 330 : 0;
-  const h = H - 60, w = Math.min(h * 3 / 4, W - panel - 24);
-  const x = Math.max(12, (W - panel - w) / 2), y = 12;
+  const area = document.querySelector('.hud').getBoundingClientRect();
+  const h = area.height, w = Math.min(h * 3 / 4, area.width);
+  const x = area.left + (area.width - w) / 2, y = H - area.bottom;
 
   camera.position.copy(node.position);
   camera.quaternion.copy(node.quaternion).multiply(PORTRAIT_ROLL);
@@ -584,12 +615,12 @@ function renderHelmetView(node) {
 
   renderer.setScissorTest(false);
   renderer.setViewport(0, 0, W, H);
-  renderer.setClearColor(0x020407);
+  renderer.setClearColor(0x07090c);
   renderer.clear();
   renderer.setScissorTest(true);
   renderer.setScissor(x, y, w, h);
   renderer.setViewport(x, y, w, h);
-  renderer.setClearColor(0x05090e);
+  renderer.setClearColor(BG);
   node.visible = false; // don't render the phone inside its own view
   renderer.render(scene, camera);
   node.visible = true;
@@ -618,6 +649,7 @@ function frame() {
   restoreOrbitCamera();
   if (lastWorldAt && performance.now() - lastWorldAt > 2000 && lastDevices.length) {
     $('hubStatus').textContent = 'NO WORLD DATA';
+    $('hubStatus').classList.remove('live');
   }
   controls.update();
   renderer.render(scene, camera);

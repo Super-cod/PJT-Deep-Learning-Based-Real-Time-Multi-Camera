@@ -2,9 +2,9 @@ import math
 import numpy as np
 import pytest
 
-from spatial_relay.filtering import OneEuroFilter, PoseFilter, PosePredictor
-from spatial_relay.models import Pose
-from spatial_relay.transforms import quaternion_to_axis_angle
+from xenon.filtering import OneEuroFilter, PoseFilter, PosePredictor
+from xenon.models import Pose
+from xenon.transforms import quaternion_to_axis_angle
 
 
 class TestOneEuroFilter:

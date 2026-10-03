@@ -1,12 +1,12 @@
 import numpy as np
 
-from spatial_relay.localization import (
+from xenon.localization import (
     back_project,
     localize_landmarks,
     median_depth_m,
     robust_depth_m,
 )
-from spatial_relay.models import CameraIntrinsics
+from xenon.models import CameraIntrinsics
 
 
 class TestMedianDepth:

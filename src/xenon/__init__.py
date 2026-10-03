@@ -1,4 +1,4 @@
-"""Spatial Relay processing hub."""
+"""Xenon processing hub."""
 
 from .models import CameraIntrinsics, Pose, SkeletonPacket
 from .transforms import Transform

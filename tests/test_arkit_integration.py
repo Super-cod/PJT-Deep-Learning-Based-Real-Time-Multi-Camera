@@ -17,9 +17,9 @@ import math
 
 import numpy as np
 
-from spatial_relay.calibration import Device, SharedFrameCalibration
-from spatial_relay.models import Pose
-from spatial_relay.transforms import (
+from xenon.calibration import Device, SharedFrameCalibration
+from xenon.models import Pose
+from xenon.transforms import (
     ARKIT_CAMERA_TO_FORWARD,
     Transform,
     arkit_direction_to_forward,

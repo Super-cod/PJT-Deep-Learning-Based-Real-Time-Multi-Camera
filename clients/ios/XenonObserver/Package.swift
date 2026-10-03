@@ -3,7 +3,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "SpatialRelayObserver",
+    name: "XenonObserver",
     platforms: [
         .iOS(.v17),
         .macOS(.v14),
@@ -11,13 +11,13 @@ let package = Package(
     products: [
         // An xtool project contains exactly one library product: the app.
         .library(
-            name: "SpatialRelayObserver",
-            targets: ["SpatialRelayObserver"]
+            name: "XenonObserver",
+            targets: ["XenonObserver"]
         ),
     ],
     targets: [
         .target(
-            name: "SpatialRelayObserver",
+            name: "XenonObserver",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
     ]
