@@ -38,6 +38,7 @@ final class ObserverController: NSObject, ObservableObject, ARSessionDelegate {
     private var lastDetection: TimeInterval = 0
     private var lastUiUpdate: TimeInterval = 0
     private var detecting = false
+    private var announcedToHub = false
     private var relayCancellable: AnyCancellable?
     private let visionQueue = DispatchQueue(label: "spatialrelay.vision", qos: .userInitiated)
 
@@ -120,6 +121,7 @@ final class ObserverController: NSObject, ObservableObject, ARSessionDelegate {
             return
         }
         room = newRoom
+        announcedToHub = true
         relay.send(CalibrationPacket(localPose: LocalPose(position: [0, 0, 0], quaternionXyzw: [0, 0, 0, 1], timestampNs: nowNs())))
         sendPose(frame.camera.transform)
         calibrated = true
@@ -164,6 +166,14 @@ final class ObserverController: NSObject, ObservableObject, ARSessionDelegate {
     // ── Pose ──────────────────────────────────────────────────────────────────
     private func sendPose(_ transform: simd_float4x4) {
         guard let room else { return }
+        // The hub ignores phone poses until it has a calibration. Our poses are
+        // already in the room frame, so announce identity once per connection.
+        if relay.state != .connected {
+            announcedToHub = false
+        } else if !announcedToHub {
+            announcedToHub = true
+            relay.send(CalibrationPacket(localPose: LocalPose(position: [0, 0, 0], quaternionXyzw: [0, 0, 0, 1], timestampNs: nowNs())))
+        }
         let p = room.toRoom(transform.translation)
         let yaw = room.yaw(of: transform)
         sequence += 1

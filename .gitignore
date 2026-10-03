@@ -5,6 +5,7 @@ __pycache__/
 venv/
 env/
 *.pyc
+*.egg-info/
 data/
 
 # Local development TLS certificates and private keys

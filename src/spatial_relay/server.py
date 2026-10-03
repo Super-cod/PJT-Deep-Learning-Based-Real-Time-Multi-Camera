@@ -15,12 +15,13 @@ from fastapi.staticfiles import StaticFiles
 
 from .calibration import Device, SharedFrameCalibration
 from .protocol import point_json, pose_from_packet, pose_json, transform_from_packet
-from .transforms import quaternion_to_yaw, yaw_to_quaternion
+from .transforms import Transform, quaternion_to_yaw, yaw_to_quaternion
 from .camera_calibration import load_intrinsics
 from .tracking import PersonTracker
 
 log = logging.getLogger("spatial_relay")
 SEND_TIMEOUT_S = 0.5
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
 
 class RelayHub:
@@ -33,11 +34,40 @@ class RelayHub:
         self.observer: WebSocket | None = None
         self.started = time.monotonic()
         self.calibration = SharedFrameCalibration()
-        # Default manual poses: laptop at origin facing +Z, phone at (1, 0, 1) facing +Z
+        # The laptop camera defines the world origin, so it needs no setup.
+        # The phone deliberately starts UNcalibrated: until it sends a
+        # `calibration` or `manual_pose` packet the hub has no phone-to-world
+        # transform, and `calibration.ready` must report that honestly instead
+        # of silently assuming a default placement.
         self.calibration.set_manual_laptop([0.0, 0.0, 0.0], 0.0)
-        self.calibration.set_manual_phone([1.0, 0.0, 1.0], 0.0)
-        self.phone_local_pose = Pose([1.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0])
+        # Matches the observer client's initial state so there is no jump on connect.
+        self.phone_local_pose = Pose([0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0])
         self.laptop_local_pose = Pose([0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0])
+        # Where the pose data actually came from: ARKit gives metric
+        # camera-to-world transforms, whereas the legacy path only ever had
+        # step-count dead reckoning. The viewer shows this so a stale or
+        # degraded source is visible instead of silently plotted.
+        self.pose_source = "none"
+        # ARKit tracking quality, plane discovery and anchor positions.
+        self.tracking: dict | None = None
+        self.planes: list[dict] = []
+        self.anchors: list[dict] = []
+        self.last_pose_update = 0.0
+        self.last_plane_update = 0.0
+        self.last_anchor_update = 0.0
+
+    def phone_world(self) -> Transform:
+        """Phone-to-world transform, or identity while the phone is uncalibrated.
+
+        Lets the hub keep broadcasting debug poses before calibration without
+        pretending it knows where the phone is.
+        """
+        if not self.calibration.ready:
+            return Transform.identity()
+        return self.calibration.world_from_phone(self.phone_local_pose)
+
+    async def broadcast_debug_pose(self) -> None:
+        await self.broadcast(self.pose_packet())
 
     @property
     def observer_connected(self) -> bool:
@@ -71,9 +101,13 @@ class RelayHub:
         return {"type": "observer_status", "connected": self.observer_connected}
 
     def pose_packet(self) -> dict:
-        phone = self.calibration.world_from_phone(self.phone_local_pose)
         laptop = self.calibration.world_from_laptop(self.laptop_local_pose)
-        return {"type": "debug_pose", "phoneWorld": pose_json(phone), "laptopWorld": pose_json(laptop), "calibrated": True}
+        return {
+            "type": "debug_pose",
+            "phoneWorld": pose_json(self.phone_world()),
+            "laptopWorld": pose_json(laptop),
+            "calibrated": self.calibration.ready,
+        }
 
     async def send_to_observer(self, packet: dict) -> bool:
         if self.observer is None:
@@ -88,47 +122,82 @@ class RelayHub:
         pose = pose_from_packet(local_pose)
         self.tracker.reset()  # the world frame just moved; old tracks are meaningless
         if device == Device.PHONE:
+            # Explicitly clear the manual placement so the calibrated
+            # phone_initial_local path is the one actually exercised.
+            self.calibration.manual_phone_position = None
+            self.calibration.manual_phone_yaw = None
             self.calibration.calibrate_phone(pose, transform_from_packet(start_offset))
-            yaw = quaternion_to_yaw(pose.quaternion_xyzw)
-            self.calibration.set_manual_phone(pose.position, yaw)
             self.phone_local_pose = pose
         else:
-            self.calibration.calibrate_laptop(pose); self.laptop_local_pose = pose
-        await self.broadcast({"type":"calibration", "ready":self.calibration.ready, "world":"laptop camera at calibration", "device":device.value})
-        await self.broadcast(self.pose_packet())
+            self.calibration.calibrate_laptop(pose)
+            self.laptop_local_pose = pose
+        await self.broadcast({
+            "type": "calibration",
+            "ready": self.calibration.ready,
+            "world": "laptop camera at calibration",
+            "device": device.value,
+        })
+        await self.broadcast_debug_pose()
 
     async def set_manual_pose(self, device: Device, position: list[float], yaw_rad: float) -> None:
         if device == Device.PHONE:
+            # Manual placement takes precedence over a previous calibration.
+            self.calibration.phone_initial_local = None
             self.calibration.set_manual_phone(position, yaw_rad)
             self.phone_local_pose = Pose(position, yaw_to_quaternion(yaw_rad))
         else:
             self.calibration.set_manual_laptop(position, yaw_rad)
             self.laptop_local_pose = Pose(position, yaw_to_quaternion(yaw_rad))
-        await self.broadcast(self.pose_packet())
+        await self.broadcast_debug_pose()
 
-    async def update_pose(self, device: Device, local_pose: dict) -> None:
+    async def update_pose(self, device: Device, local_pose: dict, source: str | None = None) -> None:
         pose = pose_from_packet(local_pose)
         if device == Device.PHONE:
             self.phone_local_pose = pose
-            # Also sync manual phone position if phone streams explicit coordinates
-            self.calibration.manual_phone_position = pose.position
-            self.calibration.manual_phone_yaw = quaternion_to_yaw(pose.quaternion_xyzw)
+            self.pose_source = source or self.pose_source
+            self.last_pose_update = time.monotonic()
+            # Mirror the live orientation as the manual yaw so the manual path
+            # still turns the phone. Leave manual_phone_position alone: the
+            # observer reports [0,0,0] as its own origin and must not override
+            # a manual placement or a calibration on every pose packet.
+            if self.calibration.manual_phone_position is not None:
+                self.calibration.manual_phone_yaw = quaternion_to_yaw(pose.quaternion_xyzw)
         else:
             self.laptop_local_pose = pose
-            self.calibration.manual_laptop_yaw = quaternion_to_yaw(pose.quaternion_xyzw)
-        await self.broadcast(self.pose_packet())
+            if self.calibration.laptop_initial_local is None:
+                self.calibration.manual_laptop_yaw = quaternion_to_yaw(pose.quaternion_xyzw)
+        await self.broadcast_debug_pose()
 
     async def localize_target(self, packet: dict) -> None:
+        """Convert a detection into world and laptop-camera coordinates.
+
+        `frame` decides how the incoming coordinates are interpreted, and the two
+        cases need *different* transforms:
+
+          - `'phone'` (default): phone-local camera coordinates, so the live
+            device pose is required for the point to follow the phone.
+          - `'arkitWorld'`: already in ARKit's room-scale world frame. That
+            frame does not move, so a constant calibration-anchored transform
+            applies. Passing these through the live-delta phone transform would
+            re-apply the device motion and double-count it.
+        """
         target_phone = packet["positionPhone"]
-        target_world, target_laptop = self.calibration.target_in_laptop(
-            target_phone, self.phone_local_pose, self.laptop_local_pose
-        )
-        phone_transform = self.calibration.world_from_phone(self.phone_local_pose)
+        frame = packet.get("frame", "phone")
+
+        if frame == "arkitWorld":
+            point_transform = self.calibration.world_from_arkit()
+        else:
+            point_transform = self.phone_world()
+
         laptop_transform = self.calibration.world_from_laptop(self.laptop_local_pose)
         laptop_inverse = laptop_transform.inverse()
+
+        target_world = point_transform.apply(target_phone)
+        target_laptop = laptop_inverse.apply(target_world)
+
         joints = []
         for joint in packet.get("jointsPhone", []):
-            world = phone_transform.apply(joint["position"])
+            world = point_transform.apply(joint["position"])
             joints.append({
                 "name": joint["name"],
                 "positionWorld": point_json(world),
@@ -139,19 +208,36 @@ class RelayHub:
             "type": "target",
             "subjectId": packet.get("subjectId", "target_01"),
             "timestampNs": packet.get("timestampNs", time.time_ns()),
+            "frame": frame,
             "positionPhone": point_json(target_phone),
             "positionWorld": point_json(target_world),
             "positionLaptop": point_json(target_laptop),
-            "phoneWorld": pose_json(phone_transform),
+            "phoneWorld": pose_json(self.phone_world()),
             "laptopWorld": pose_json(laptop_transform),
             "joints": joints,
-            "confidence": packet.get("confidence", 1.0)
+            "confidence": packet.get("confidence", 1.0),
+            "calibrated": self.calibration.ready,
         })
 
+    async def update_tracking(self, packet: dict) -> None:
+        """Record ARKit tracking quality so `/health` and the viewer can show it."""
+        self.tracking = {
+            "status": packet.get("status", "unavailable"),
+            "limitedReason": packet.get("limitedReason"),
+            "timestampMs": packet.get("timestampMs"),
+        }
+
+    async def update_planes(self, packet: dict) -> None:
+        self.planes = list(packet.get("planes", []))
+        self.last_plane_update = time.monotonic()
+
+    async def update_anchors(self, packet: dict) -> None:
+        self.anchors = list(packet.get("anchors", []))
+        self.last_anchor_update = time.monotonic()
 
     async def localize_people(self, packet: dict) -> None:
         """Batch of every person one observer frame saw → tracked ``targets`` broadcast."""
-        phone_transform = self.calibration.world_from_phone(self.phone_local_pose)
+        phone_transform = self.phone_world()
         laptop_transform = self.calibration.world_from_laptop(self.laptop_local_pose)
         laptop_inverse = laptop_transform.inverse()
 
@@ -187,6 +273,7 @@ class RelayHub:
             "phoneWorld": pose_json(phone_transform),
             "laptopWorld": pose_json(laptop_transform),
             "targets": targets,
+            "calibrated": self.calibration.ready,
         })
 
 
@@ -202,7 +289,24 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 
 @app.get("/health")
 async def health() -> dict:
-    return {"ok": True, "observerConnected": hub.observer_connected, "viewers": len(hub.viewers), "calibrated": hub.calibration.ready, "uptimeS": round(time.monotonic()-hub.started, 2)}
+    now = time.monotonic()
+    # ARKit streams pose at 25 Hz and a 1 Hz tracking heartbeat, so anything
+    # older than a few seconds means the phone stopped reporting even though
+    # the socket is still open.
+    pose_age = now - hub.last_pose_update if hub.last_pose_update else None
+    return {
+        "ok": True,
+        "observerConnected": hub.observer_connected,
+        "viewers": len(hub.viewers),
+        "calibrated": hub.calibration.ready,
+        "uptimeS": round(now - hub.started, 2),
+        "poseSource": hub.pose_source,
+        "poseAgeS": round(pose_age, 2) if pose_age is not None else None,
+        "phonePoseLive": pose_age is not None and pose_age < 3.0,
+        "tracking": hub.tracking,
+        "planes": len(hub.planes),
+        "anchors": len(hub.anchors),
+    }
 
 @app.get("/latest")
 async def latest() -> dict:
@@ -216,9 +320,12 @@ async def camera_intrinsics() -> dict:
 OBSERVER_HANDLERS = {
     "calibration": lambda p: hub.update_calibration(Device.PHONE, p["localPose"], p.get("worldFromPhoneAtStart")),
     "manual_pose": lambda p: hub.set_manual_pose(Device.PHONE, p["position"], _yaw_from_packet(p)),
-    "pose": lambda p: hub.update_pose(Device.PHONE, p["localPose"]),
+    "pose": lambda p: hub.update_pose(Device.PHONE, p["localPose"], p.get("source")),
     "detection": lambda p: hub.localize_target(p),  # single target (legacy / tap-to-mark)
     "detections": lambda p: hub.localize_people(p),  # every person in one frame
+    "tracking": lambda p: hub.update_tracking(p),
+    "arkit_planes": lambda p: hub.update_planes(p),
+    "arkit_anchors": lambda p: hub.update_anchors(p),
     "skeleton": lambda p: hub.broadcast(p),
 }
 
@@ -236,29 +343,44 @@ async def observer(socket: WebSocket) -> None:
     hub.observer = socket
     if previous is not None:
         # A reconnecting phone replaces its stale half-open socket.
-        try: await previous.close()
-        except Exception: pass
-    log.info("observer connected from %s", socket.client)
+        try:
+            await previous.close()
+        except Exception:
+            pass
+    log.info("phone observer connected")
     await hub.broadcast(hub.status_packet())
     try:
         while True:
-            text = await socket.receive_text()
             try:
-                packet = json.loads(text)
-                handler = OBSERVER_HANDLERS.get(packet.get("type"))
+                packet = await socket.receive_json()
+            except WebSocketDisconnect:
+                raise
+            except Exception as exc:  # malformed frame, not a disconnect
+                log.warning("phone sent an unreadable frame: %s", exc)
+                continue
+            try:
+                kind = packet.get("type")
+                handler = OBSERVER_HANDLERS.get(kind)
                 if handler is None:
-                    await socket.send_json({"type": "error", "message": f"Unknown packet type {packet.get('type')!r}"})
+                    log.warning("phone sent unknown packet type %r", kind)
+                    await socket.send_json({"type": "error", "message": f"Expected one of {', '.join(OBSERVER_HANDLERS)}"})
                     continue
                 await handler(packet)
-            except (ValueError, KeyError, TypeError, IndexError) as exc:
-                # One malformed packet must not drop the live stream.
-                await socket.send_json({"type": "error", "message": f"Bad packet: {exc!r}"})
+            except Exception as exc:
+                # A single bad packet must not drop the phone's connection.
+                log.warning("phone packet %r rejected: %s", packet.get("type"), exc)
+                try:
+                    await socket.send_json({"type": "error", "message": str(exc)})
+                except Exception:
+                    pass
+                continue
+            await socket.send_json({"type": "ack", "sequence": packet.get("sequence")})
     except WebSocketDisconnect:
         pass
     finally:
         if hub.observer is socket:
             hub.observer = None
-            log.info("observer disconnected")
+            log.info("phone observer disconnected")
             await hub.broadcast(hub.status_packet())
 
 
@@ -272,10 +394,20 @@ async def viewer(socket: WebSocket) -> None:
         await socket.send_json(hub.last_target)
     if hub.last_targets:
         await socket.send_json(hub.last_targets)
+    # Tell the viewer what the phone is actually doing, so an ARKit-limited or
+    # disconnected tracker is visible rather than a frozen last-known position.
+    await socket.send_json({
+        "type": "phone_status",
+        "poseSource": hub.pose_source,
+        "calibrated": hub.calibration.ready,
+        "tracking": hub.tracking,
+        "planes": hub.planes,
+        "anchors": hub.anchors,
+    })
     try:
         while True:
             try:
-                packet = json.loads(await socket.receive_text())
+                packet = await socket.receive_json()
                 kind = packet.get("type")
                 if kind == "calibration":
                     await hub.update_calibration(Device.LAPTOP, packet["localPose"])

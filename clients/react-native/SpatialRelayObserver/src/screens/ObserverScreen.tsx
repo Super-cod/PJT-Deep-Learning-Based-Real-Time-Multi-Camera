@@ -157,6 +157,9 @@ export function ObserverScreen() {
   // ── Continuous pose broadcast at 25 Hz (reads refs → never re-created) ────
   useEffect(() => {
     if (wsStatus !== 'connected') return;
+    // The hub ignores phone poses until it has a calibration. Our poses are
+    // already in the room frame (zeroed by Calibrate), so announce identity.
+    sendRef.current({ type: 'calibration', localPose: IDENTITY_POSE(Date.now() * 1_000_000) });
     const id = setInterval(sendPose, POSE_INTERVAL_MS);
     return () => clearInterval(id);
   }, [wsStatus, sendPose]);
