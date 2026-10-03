@@ -19,11 +19,12 @@ const SKELETON_LINKS = [
   ['left_hip', 'left_knee'], ['left_knee', 'left_ankle'],
   ['right_hip', 'right_knee'], ['right_knee', 'right_ankle'],
 ];
-// Tracks (people) in warm tactical tones, assets (phones) in friendly blues.
-const PERSON_COLORS = [0xec9a3c, 0xf0b726, 0xe76a6e, 0xd69fd6, 0x2ee6d6, 0x72ca9b];
-const DEVICE_COLORS = [0x4c90f0, 0x8abbff, 0x3fa6da, 0x9d8ff0, 0x68c1ee];
-const OCCLUDED = 0xe76a6e;
-const BG = 0x0d1014;
+// Same palette as the landing page: tracks (people) in hot tones, helmets
+// (phones) in white / signal green / cool tones, blaze orange for occlusion.
+const PERSON_COLORS = [0xff4d1a, 0xffb020, 0xff3d6e, 0xff7a4d, 0xffd166, 0xc9a7ff];
+const DEVICE_COLORS = [0xf4f4f2, 0x7dff5a, 0x8ad4ff, 0xffe08a, 0xc9a7ff];
+const OCCLUDED = 0xff4d1a;
+const BG = 0x050505;
 // iPhone wide camera field of view (degrees) along the image's long / short side.
 const PHONE_FOV_LONG = 69;
 const PHONE_FOV_SHORT = 54;
@@ -31,7 +32,7 @@ const PHONE_FOV_SHORT = 54;
 // +90° roll about the viewing axis turns them into an upright portrait view.
 const PORTRAIT_ROLL = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI / 2);
 const ORBIT_FOV = 60;
-const SURFACE_COLORS = { wall: 0x8f99a8, door: 0xec9a3c, window: 0x4c90f0, opening: 0x4c90f0 };
+const SURFACE_COLORS = { wall: 0xd9d9d4, door: 0xff7a4d, window: 0x8ad4ff, opening: 0x8ad4ff };
 
 function colorFor(palette, key) {
   let h = 0;
@@ -48,7 +49,7 @@ $('scene').appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(BG);
 scene.fog = new THREE.Fog(BG, 18, 45);
-scene.add(new THREE.HemisphereLight(0xdfe7f2, 0x0d1014, 1.1));
+scene.add(new THREE.HemisphereLight(0xf4f4f2, 0x050505, 1.1));
 const sun = new THREE.DirectionalLight(0xffffff, 0.8);
 sun.position.set(4, 10, 6);
 scene.add(sun);
@@ -58,7 +59,7 @@ camera.position.set(6, 7, 8);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 
-const grid = new THREE.GridHelper(30, 60, 0x2f343c, 0x1a1f25);
+const grid = new THREE.GridHelper(30, 60, 0x2a2a2a, 0x151515);
 scene.add(grid);
 scene.add(new THREE.AxesHelper(0.5));
 
@@ -80,23 +81,30 @@ resize();
 
 // ── Text labels (sprites) ────────────────────────────────────────────────────
 const LABEL_HEIGHT = 0.032; // fraction of the viewport height
-function makeLabel(text, color = '#f6f7f9') {
+function makeLabel(text, color = '#f4f4f2') {
+  // Pill tag: dark glass, coloured dot, mono caps — same as the landing page chips.
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
-  const font = '600 26px ui-monospace, "SF Mono", Menlo, monospace';
+  const font = '600 25px "JetBrains Mono", ui-monospace, Menlo, monospace';
   const shown = text.toUpperCase();
   ctx.font = font;
-  canvas.width = Math.ceil(ctx.measureText(shown).width) + 34;
-  canvas.height = 44;
-  ctx.font = font;
-  ctx.fillStyle = 'rgba(17, 20, 24, 0.88)';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.strokeStyle = 'rgba(64, 72, 84, 0.9)';
+  canvas.width = Math.ceil(ctx.measureText(shown).width) + 62;
+  canvas.height = 46;
+  const r = canvas.height / 2;
+  ctx.beginPath();
+  ctx.roundRect(1, 1, canvas.width - 2, canvas.height - 2, r - 1);
+  ctx.fillStyle = 'rgba(14, 14, 16, 0.86)';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.16)';
   ctx.lineWidth = 2;
-  ctx.strokeRect(1, 1, canvas.width - 2, canvas.height - 2);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(r, r, 7, 0, Math.PI * 2);
   ctx.fillStyle = color;
-  ctx.fillRect(0, 0, 6, canvas.height);
-  ctx.fillText(shown, 18, 31);
+  ctx.fill();
+  ctx.font = font;
+  ctx.fillStyle = color;
+  ctx.fillText(shown, r + 18, 32);
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   // Constant on-screen size, so labels stay readable in orbit and helmet views alike.
@@ -177,7 +185,7 @@ function addFloor(s) {
     geometry = new THREE.PlaneGeometry(s.dimensions[0], s.dimensions[1]);
   }
   const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({
-    color: 0x1c2127, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false,
+    color: 0x161616, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false,
   }));
   mesh.matrixAutoUpdate = false;
   mesh.matrix.copy(matrixFrom(s.transform));
@@ -187,12 +195,12 @@ function addFloor(s) {
 function addObject(o) {
   const geometry = new THREE.BoxGeometry(...o.dimensions.map(d => Math.max(d, 0.02)));
   const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({
-    color: 0x404854, transparent: true, opacity: 0.35, depthWrite: false,
+    color: 0x3a3a3a, transparent: true, opacity: 0.35, depthWrite: false,
   }));
   mesh.matrixAutoUpdate = false;
   mesh.matrix.copy(matrixFrom(o.transform));
-  mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(geometry), new THREE.LineBasicMaterial({ color: 0x8f99a8 })));
-  const label = makeLabel(o.category, '#8f99a8');
+  mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(geometry), new THREE.LineBasicMaterial({ color: 0x8a8a86 })));
+  const label = makeLabel(o.category, '#9a9a96');
   label.position.set(0, o.dimensions[1] / 2 + 0.12, 0);
   label.scale.multiplyScalar(0.7);
   mesh.add(label);
@@ -225,12 +233,11 @@ async function loadRoom(version) {
       if (viewMode !== 'follow') fitView(box);
     }
     roomVersion = version;
-    const stat = (k, v) => `<span class="kv"><span>${k}</span><b>${v}</b></span>`;
-    $('roomInfo').innerHTML = [
-      stat('ROOMS', room.rooms ?? 1), stat('WALLS', (room.walls || []).length),
-      stat('DOORS', (room.doors || []).length), stat('WINDOWS', (room.windows || []).length),
-      stat('OBJECTS', (room.objects || []).length),
-    ].join('<br>');
+    const stat = (k, v) => `<div><b>${v}</b><span>${k}</span></div>`;
+    $('roomInfo').innerHTML = '<div class="stats">' + [
+      stat('Rooms', room.rooms ?? 1), stat('Walls', (room.walls || []).length),
+      stat('Doors', (room.doors || []).length), stat('Windows', (room.windows || []).length),
+    ].join('') + '</div>';
   } catch (err) {
     console.warn('room load failed', err);
   } finally {
@@ -327,7 +334,7 @@ function makePerson(id) {
     return mesh;
   };
   const ring = new THREE.Mesh(
-    new THREE.RingGeometry(0.24, 0.27, 4, 1, Math.PI / 4),
+    new THREE.RingGeometry(0.24, 0.28, 40),
     new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide, transparent: true, opacity: 0.8 }),
   );
   ring.rotation.x = -Math.PI / 2;
@@ -457,7 +464,7 @@ function updatePeople(people, devices) {
     const hex = '#' + node.userData.color.toString(16).padStart(6, '0');
     setLabel(node.userData.labelHolder,
       hiddenFrom.length ? `${person.id} · occluded · ${hiddenFrom.join(', ')}` : person.id,
-      hiddenFrom.length ? '#e76a6e' : hex);
+      hiddenFrom.length ? '#ff7a4d' : hex);
     rows.push({ person, hex, hiddenFrom, devices });
   });
 
@@ -485,6 +492,23 @@ let lastPeopleRender = 0;
 const nameOf = (devices, id) => devices.find(d => d.id === id)?.name ?? id;
 const fmt = v => v.map(n => (n >= 0 ? '+' : '') + n.toFixed(2)).join(' ');
 
+// Live ticker: one item per track, occlusion alerts highlighted. Rebuilt only
+// when the text changes so the marquee doesn't restart every packet.
+let tickerText = '';
+function updateTicker(rows) {
+  const items = rows.map(({ person, hiddenFrom, devices }) => hiddenFrom.length
+    ? `<span class="hot"><b>${person.id} behind wall</b> — hidden from ${hiddenFrom.join(', ')}, seen by ${person.seenBy.map(id => nameOf(devices, id)).join(', ')}</span>`
+    : `<span><b>${person.id} visual</b> — seen by ${person.seenBy.map(id => nameOf(devices, id)).join(', ')}</span>`);
+  if (!items.length) items.push(`<span><b>No tracks</b> — ${lastDevices.filter(d => d.online).length} helmet(s) online, scanning</span>`);
+  const html = items.join('');
+  if (html === tickerText) return;
+  tickerText = html;
+  const track = $('ticker');
+  track.innerHTML = html + html; // doubled for a seamless -50% loop
+  track.classList.add('run');
+  track.style.setProperty('--dur', `${Math.max(16, items.length * 9)}s`);
+}
+
 function renderPeopleList(rows) {
   const now = performance.now();
   if (now - lastPeopleRender < 250 && Number($('peopleCount').textContent) === rows.length) return;
@@ -493,13 +517,14 @@ function renderPeopleList(rows) {
   $('statTracks').textContent = rows.length;
   $('statOccluded').textContent = rows.filter(r => r.hiddenFrom.length).length;
   setHtml('people', rows.length ? rows.map(({ person, hex, hiddenFrom, devices }) => `
-    <li style="--li:${hex}" class="${hiddenFrom.length ? 'alert' : ''}">
-      <div class="head"><span class="name"><span class="dot" style="background:${hex}"></span>${person.id}</span>
+    <li class="${hiddenFrom.length ? 'alert' : ''}">
+      <div class="head"><span class="name"><span class="sq" style="background:${hex};border-radius:50%"></span>${person.id}</span>
         <span class="tag ${hiddenFrom.length ? 'hidden' : 'vis'}">${hiddenFrom.length ? 'Occluded' : 'Visual'}</span></div>
       <div class="sub">POS <b>${fmt(person.position)}</b></div>
       <div class="sub">SRC <b>${person.seenBy.map(id => nameOf(devices, id)).join(', ').toUpperCase()}</b></div>
-      ${hiddenFrom.length ? `<div class="warn">▲ BEHIND WALL FROM ${hiddenFrom.join(', ').toUpperCase()}</div>` : ''}
+      ${hiddenFrom.length ? `<div class="warn"><i>!</i>BEHIND WALL FROM ${hiddenFrom.join(', ').toUpperCase()}</div>` : ''}
     </li>`).join('') : '<li class="empty">No tracks</li>');
+  updateTicker(rows);
 }
 
 function renderDeviceList(devices) {
@@ -509,16 +534,16 @@ function renderDeviceList(devices) {
   setHtml('devices', devices.length ? devices.map(d => {
     const hex = '#' + colorFor(DEVICE_COLORS, d.id).toString(16).padStart(6, '0');
     return `
-    <li style="--li:${d.online ? hex : '#404854'}">
-      <div class="head"><span class="name"><span class="dot" style="background:${d.online ? hex : '#404854'}"></span>${d.name}</span>
-        <span class="tag ${d.online ? 'ok' : 'off'}">${d.online ? 'Online' : 'Offline'}</span></div>
+    <li>
+      <div class="head"><span class="name"><span class="sq" style="background:${d.online ? hex : '#3a3a3a'}"></span>${d.name}</span>
+        <span class="tag ${d.online ? 'ok' : 'off'}">${d.online ? '● Link' : 'Offline'}</span></div>
       <div class="sub">SENSOR <b>${d.hasLidar ? 'LIDAR' : 'MONO (EST. DEPTH)'}</b></div>
       ${d.online ? `<div class="sub">CONTACTS <b>${d.peopleSeen}</b></div>` : ''}
     </li>`;
-  }).join('') : '<li class="empty">No assets online</li>');
+  }).join('') : '<li class="empty">No helmets online</li>');
 
   setHtml('followButtons', devices.filter(d => d.online).map(d =>
-    `<button data-follow="${d.id}" class="${viewMode === 'follow' && followId === d.id ? 'active' : ''}">◉ ${d.name}</button>`,
+    `<button data-follow="${d.id}" class="${viewMode === 'follow' && followId === d.id ? 'active' : ''}">${d.name}</button>`,
   ).join(''));
 }
 
@@ -546,7 +571,7 @@ function setView(mode, id = null) {
   document.querySelectorAll('#followButtons button').forEach(b => b.classList.toggle('active', mode === 'follow' && b.dataset.follow === id));
   document.body.classList.toggle('helmet', mode === 'follow');
   const name = lastDevices.find(d => d.id === id)?.name ?? id;
-  $('viewTag').textContent = mode === 'follow' ? `● HELMET FEED // ${String(name).toUpperCase()}` : mode === 'top' ? 'VIEW // PLAN' : 'VIEW // 3D ORBIT';
+  $('viewTag').textContent = mode === 'follow' ? `Helmet feed · ${name}` : mode === 'top' ? 'Plan view' : '3D Orbit';
   if (mode !== 'follow') {
     const box = new THREE.Box3().setFromObject(roomGroup);
     fitView(box.isEmpty() ? new THREE.Box3(new THREE.Vector3(-3, 0, -3), new THREE.Vector3(3, 2, 3)) : box);
@@ -572,7 +597,7 @@ function onWorld(packet) {
   packetCount += 1;
   lastWorldAt = performance.now();
   if (!$('hubStatus').classList.contains('live')) {
-    $('hubStatus').textContent = 'HUB LINK';
+    $('hubStatus').textContent = 'Hub link';
     $('hubStatus').classList.add('live');
   }
   lastDevices = packet.devices;
@@ -584,14 +609,14 @@ function onWorld(packet) {
 
 function connect() {
   const socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/viewer`);
-  socket.onopen = () => { $('hubStatus').textContent = 'HUB LINK'; $('hubStatus').classList.add('live'); };
+  socket.onopen = () => { $('hubStatus').textContent = 'Hub link'; $('hubStatus').classList.add('live'); };
   socket.onmessage = e => {
     let p;
     try { p = JSON.parse(e.data); } catch { return; }
     if (p.type === 'world') onWorld(p);
   };
   socket.onclose = () => {
-    $('hubStatus').textContent = 'RECONNECTING';
+    $('hubStatus').textContent = 'Reconnecting';
     $('hubStatus').classList.remove('live');
     setTimeout(connect, 2000);
   };
@@ -615,7 +640,7 @@ function renderHelmetView(node) {
 
   renderer.setScissorTest(false);
   renderer.setViewport(0, 0, W, H);
-  renderer.setClearColor(0x07090c);
+  renderer.setClearColor(0x000000);
   renderer.clear();
   renderer.setScissorTest(true);
   renderer.setScissor(x, y, w, h);
@@ -648,7 +673,7 @@ function frame() {
   }
   restoreOrbitCamera();
   if (lastWorldAt && performance.now() - lastWorldAt > 2000 && lastDevices.length) {
-    $('hubStatus').textContent = 'NO WORLD DATA';
+    $('hubStatus').textContent = 'No world data';
     $('hubStatus').classList.remove('live');
   }
   controls.update();

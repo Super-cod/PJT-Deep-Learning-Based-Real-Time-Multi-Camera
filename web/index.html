@@ -3,8 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Xenon | Operations</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 2 29 9.5v13L16 30 3 22.5v-13z' fill='none' stroke='%234c90f0' stroke-width='2.5'/%3E%3Cpath d='M10 10l12 12M22 10 10 22' stroke='%23f6f7f9' stroke-width='2.5'/%3E%3C/svg%3E">
+  <title>Xenon | Command</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23ff4d1a'/%3E%3Cpath d='M9 9l14 14M23 9 9 23' stroke='%23000' stroke-width='3.5' stroke-linecap='square'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/vendor/fonts/fonts.css">
   <link rel="stylesheet" href="/world.css">
   <script type="importmap">
     {
@@ -17,64 +18,62 @@
 </head>
 <body>
   <div id="scene"></div>
-
-  <div class="classification">UNCLASSIFIED // XENON SITUATIONAL AWARENESS // DEMONSTRATION</div>
+  <div class="vignette" aria-hidden="true"></div>
 
   <header class="bar">
-    <div class="brand">
-      <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 2 29 9.5v13L16 30 3 22.5v-13z"/><path class="x" d="M10.5 10.5l11 11M21.5 10.5l-11 11"/></svg>
-      <span class="word">XENON</span>
-      <span class="sep"></span>
-      <span class="module">OPERATIONS // WORLD VIEW</span>
-    </div>
-    <nav class="tabs" id="viewButtons">
-      <button data-view="orbit" class="active">3D</button>
-      <button data-view="top">PLAN</button>
+    <a class="logo" href="/"><i><svg viewBox="0 0 18 18"><path d="M2 2l14 14M16 2 2 16"/></svg></i>Xenon</a>
+    <nav class="tabs glass" id="viewButtons">
+      <button data-view="orbit" class="active">3D Orbit</button>
+      <button data-view="top">Plan</button>
     </nav>
     <div class="bar-right">
-      <span class="kv"><span>UTC</span><b id="clock">--:--:--</b></span>
-      <div id="hubStatus" class="pill">CONNECTING</div>
+      <span class="chip glass mono"><span class="k">UTC</span><b id="clock">--:--:--</b></span>
+      <div id="hubStatus" class="chip glass status">Connecting</div>
     </div>
   </header>
 
-  <aside class="panel left">
-    <section>
-      <h2><span>Layers</span></h2>
+  <div class="ticker glass" aria-live="polite">
+    <span class="tag">Live</span>
+    <div class="viewport"><div class="track" id="ticker"><span><b>Awaiting world feed</b> — start the hub and connect a helmet</span></div></div>
+  </div>
+
+  <aside class="col left">
+    <section class="card glass">
+      <h2>Layers</h2>
       <label class="slider"><span>Wall opacity</span>
         <input id="wallOpacity" type="range" min="0.05" max="0.9" step="0.05" value="0.22">
       </label>
-      <label class="check"><input id="showObjects" type="checkbox" checked><span>Furniture</span></label>
-      <label class="check"><input id="showSight" type="checkbox" checked><span>Sight lines</span></label>
+      <label class="switch"><input id="showObjects" type="checkbox" checked><i></i><span>Furniture</span></label>
+      <label class="switch"><input id="showSight" type="checkbox" checked><i></i><span>Sight lines</span></label>
     </section>
 
-    <section>
-      <h2><span>Helmet feeds</span></h2>
-      <div class="row" id="followButtons"></div>
-      <p class="muted small">Select an asset to view through its camera.</p>
+    <section class="card glass">
+      <h2>Helmet feeds</h2>
+      <div class="pills" id="followButtons"></div>
     </section>
 
-    <section>
-      <h2><span>Structure</span></h2>
-      <p id="roomInfo" class="muted">No structure scanned. On a LiDAR iPhone tap <b>SCAN</b>, then <b>SAVE &amp; SHARE</b>.</p>
+    <section class="card glass">
+      <h2>Structure</h2>
+      <div id="roomInfo" class="muted">No structure scanned. On a LiDAR iPhone tap <b>Scan</b>, then <b>Save &amp; share</b>.</div>
     </section>
 
-    <section class="legend">
-      <h2><span>Legend</span></h2>
-      <div><i class="solid"></i> Direct line of sight</div>
-      <div><i class="dashed"></i> Occluded — <b>behind wall</b></div>
-      <div><i class="asset"></i> Friendly asset (phone)</div>
-      <div><i class="track"></i> Tracked person</div>
+    <section class="card glass legend">
+      <h2>Legend</h2>
+      <div><i class="solid"></i>Direct line of sight</div>
+      <div><i class="dashed"></i>Occluded — <b>behind wall</b></div>
+      <div><i class="asset"></i>Helmet (asset)</div>
+      <div><i class="track"></i>Tracked person</div>
     </section>
   </aside>
 
-  <aside class="panel right">
-    <section>
-      <h2><span>Assets</span><span id="deviceCount" class="count">0</span></h2>
-      <ul id="devices" class="list"><li class="empty">No assets online</li></ul>
+  <aside class="col right">
+    <section class="card glass">
+      <h2>Assets <span id="deviceCount" class="count">0</span></h2>
+      <ul id="devices" class="list"><li class="empty">No helmets online</li></ul>
     </section>
 
-    <section>
-      <h2><span>Tracks</span><span id="peopleCount" class="count">0</span></h2>
+    <section class="card glass">
+      <h2>Tracks <span id="peopleCount" class="count">0</span></h2>
       <ul id="people" class="list"><li class="empty">No tracks</li></ul>
     </section>
   </aside>
@@ -82,17 +81,15 @@
   <div class="hud" aria-hidden="true">
     <i class="c tl"></i><i class="c tr"></i><i class="c bl"></i><i class="c br"></i>
     <div class="reticle"></div>
-    <div id="viewTag" class="view-tag">VIEW // 3D ORBIT</div>
+    <div id="viewTag" class="view-tag">3D Orbit</div>
   </div>
 
-  <footer class="status">
-    <span class="kv"><span>FRAME</span><b>SHARED MAP</b></span>
-    <span class="kv"><span>ASSETS</span><b id="statAssets">0</b></span>
-    <span class="kv"><span>TRACKS</span><b id="statTracks">0</b></span>
-    <span class="kv"><span>OCCLUDED</span><b id="statOccluded" class="warn">0</b></span>
-    <span class="kv"><span>FEED</span><b id="statRate">— Hz</b></span>
-    <span class="grow"></span>
-    <span class="kv"><span>XENON</span><b>v0.1</b></span>
+  <footer class="status glass">
+    <span class="kv"><span>Frame</span><b>Shared map</b></span>
+    <span class="kv"><span>Assets</span><b id="statAssets">0</b></span>
+    <span class="kv"><span>Tracks</span><b id="statTracks">0</b></span>
+    <span class="kv"><span>Occluded</span><b id="statOccluded" class="hot">0</b></span>
+    <span class="kv"><span>Feed</span><b id="statRate">— Hz</b></span>
   </footer>
 
   <script type="module" src="/world.js"></script>

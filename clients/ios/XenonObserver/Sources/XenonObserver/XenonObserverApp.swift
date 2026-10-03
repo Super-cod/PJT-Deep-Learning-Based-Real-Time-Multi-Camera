@@ -11,7 +11,7 @@ struct XenonObserverApp: App {
             ContentView()
                 .environmentObject(observer)
                 .preferredColorScheme(.dark)
-                .tint(Theme.blue)
+                .tint(Theme.blaze)
         }
     }
 }
@@ -26,18 +26,23 @@ struct ContentView: View {
                 ZStack {
                     ARCameraView(session: observer.session, scene: observer.overlay.scene)
                     SkeletonOverlay(skeletons: observer.overlayJoints)
-                    HUDFrame().padding(.top, 96).padding(.bottom, 8)
+                    LinearGradient(colors: [.black.opacity(0.65), .clear, .clear, .black.opacity(0.75)],
+                                   startPoint: .top, endPoint: .bottom)
+                        .allowsHitTesting(false)
+                    HUDFrame().padding(.top, 120).padding(.bottom, 12)
                 }
                 .onAppear { observer.viewportSize = geo.size }
                 .onChange(of: geo.size) { _, size in observer.viewportSize = size }
             }
             .ignoresSafeArea()
 
-            VStack(spacing: 0) {
+            VStack(spacing: 10) {
                 header
                 Spacer()
                 controls
             }
+            .padding(.horizontal, 12)
+            .padding(.bottom, 6)
         }
         .sheet(isPresented: $showSettings) {
             SettingsView(host: observer.hubHost, port: observer.hubPort, name: observer.deviceName) { host, port, name in
@@ -54,103 +59,95 @@ struct ContentView: View {
 
     private var hubColor: Color {
         switch observer.relay.state {
-        case .connected: Theme.green
-        case .connecting: Theme.amber
-        case .disconnected: Theme.red
+        case .connected: Theme.live
+        case .connecting: Theme.blaze2
+        case .disconnected: Theme.blaze
         }
     }
 
     private var tracking: Bool { observer.trackingText == "Tracking" }
 
     private var header: some View {
-        VStack(spacing: 0) {
-            Text("UNCLASSIFIED // XENON // \(observer.deviceName.uppercased())")
-                .font(Theme.mono(9, .semibold))
-                .tracking(1.6)
-                .foregroundStyle(Color.white.opacity(0.92))
-                .lineLimit(1)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 3)
-                .background(Theme.classification)
+        VStack(spacing: 8) {
             HStack(spacing: 10) {
-                XenonMark().frame(width: 20, height: 20)
-                Text("XENON")
-                    .font(.system(size: 15, weight: .bold))
-                    .tracking(4)
+                XenonMark().frame(width: 32, height: 32)
+                Text("Xenon")
+                    .font(Theme.sans(20, .heavy))
                     .foregroundStyle(Theme.text)
-                Rectangle().fill(Theme.line2).frame(width: 1, height: 18)
+                Spacer(minLength: 4)
                 Button { observer.relay.reconnect() } label: {
-                    HStack(spacing: 6) {
-                        Rectangle().fill(hubColor).frame(width: 6, height: 6)
+                    HStack(spacing: 7) {
+                        LED(color: hubColor)
                         Text(observer.relay.state == .connected ? "HUB LINK" : observer.relay.state.rawValue.uppercased())
-                            .font(Theme.mono(10, .semibold))
-                            .tracking(1.2)
+                            .font(Theme.mono(11, .semibold))
+                            .tracking(0.8)
                     }
                     .foregroundStyle(hubColor)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 4)
-                    .overlay(Rectangle().stroke(hubColor.opacity(0.5), lineWidth: 1))
+                    .padding(.horizontal, 12)
+                    .frame(height: 34)
+                    .glass(17)
                 }
-                Spacer(minLength: 4)
                 Button { showSettings = true } label: {
                     Image(systemName: "slider.horizontal.3")
-                        .foregroundStyle(Theme.muted)
-                        .frame(width: 30, height: 26)
-                        .overlay(Rectangle().stroke(Theme.line2, lineWidth: 1))
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Theme.text)
+                        .frame(width: 34, height: 34)
+                        .glass(17)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(Theme.panel.opacity(0.94))
-            HStack(spacing: 14) {
-                kv("HUB", observer.hubHost.isEmpty ? "NOT SET" : observer.hubHost)
-                kv("TRK", observer.trackingText.uppercased(), tracking ? Theme.green : Theme.amber)
-                Spacer()
-                kv("MODE", modeName, modeColor)
+            // Ticker-style status strip, like the landing page.
+            HStack(spacing: 10) {
+                Text(modeName)
+                    .font(Theme.sans(11, .heavy))
+                    .tracking(1.6)
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 11)
+                    .frame(height: 26)
+                    .background(Capsule().fill(modeColor))
+                HStack(spacing: 6) {
+                    Text("✕").foregroundStyle(Theme.blaze).font(.system(size: 9, weight: .bold))
+                    Text(observer.hubHost.isEmpty ? "No hub set" : observer.hubHost).foregroundStyle(Theme.text)
+                    Text("✕").foregroundStyle(Theme.blaze).font(.system(size: 9, weight: .bold))
+                    Text(observer.trackingText).foregroundStyle(tracking ? Theme.muted : Theme.blaze2)
+                }
+                .font(Theme.sans(12, .medium))
+                .lineLimit(1)
+                Spacer(minLength: 0)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 5)
-            .background(Theme.panel.opacity(0.8))
-            .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
+            .padding(.leading, 4)
+            .padding(.trailing, 12)
+            .frame(height: 34)
+            .glass(17)
         }
     }
 
     private var modeName: String {
         switch observer.mode {
         case .scanning: "SCAN"
-        case .sharedMap: "SHARED MAP"
-        case .calibratedRoom: observer.calibrated ? "CALIBRATED" : "UNCALIBRATED"
-        case .relocalizing: "RELOCALIZING"
+        case .sharedMap: "LIVE"
+        case .calibratedRoom: observer.calibrated ? "LIVE" : "CALIBRATE"
+        case .relocalizing: "RELOC"
         }
     }
 
     private var modeColor: Color {
         switch observer.mode {
-        case .sharedMap: Theme.green
-        case .calibratedRoom: observer.calibrated ? Theme.green : Theme.amber
-        case .scanning: Theme.blue
-        case .relocalizing: Theme.amber
+        case .sharedMap: Theme.blaze
+        case .calibratedRoom: observer.calibrated ? Theme.blaze : Theme.text
+        case .scanning: Theme.sky
+        case .relocalizing: Theme.blaze2
         }
-    }
-
-    private func kv(_ key: String, _ value: String, _ color: Color = Theme.text) -> some View {
-        HStack(spacing: 5) {
-            Text(key).foregroundStyle(Theme.dim)
-            Text(value).foregroundStyle(color).lineLimit(1)
-        }
-        .font(Theme.mono(10, .medium))
-        .tracking(0.8)
     }
 
     private var controls: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 6) {
-                Text("›").foregroundStyle(Theme.blue)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                LED(color: observer.relay.state == .connected ? Theme.live : Theme.blaze)
                 Text(observer.status)
+                    .font(Theme.mono(11, .medium))
                     .foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .font(Theme.mono(11))
             if observer.mode == .scanning {
                 scanPanel
             } else {
@@ -159,41 +156,47 @@ struct ContentView: View {
             }
         }
         .padding(14)
-        .background(Theme.panel.opacity(0.94))
-        .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 1) }
+        .glass(26)
         .disabled(observer.busy)
-        .overlay { if observer.busy { ProgressView().tint(Theme.blue) } }
+        .overlay { if observer.busy { ProgressView().tint(Theme.blaze) } }
     }
 
     private var telemetry: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
                 SectionLabel(text: "Contacts")
                 Spacer()
-                Tag(text: observer.overlayJoints.isEmpty ? "No contact" : "Visual", color: observer.overlayJoints.isEmpty ? Theme.dim : Theme.amber)
+                Tag(text: observer.overlayJoints.isEmpty ? "No contact" : "Visual",
+                    color: observer.overlayJoints.isEmpty ? Theme.dim : Theme.blaze,
+                    solid: !observer.overlayJoints.isEmpty)
             }
-            Text(observer.targetText.uppercased())
-                .font(Theme.mono(11, .semibold))
+            Text(observer.targetText)
+                .font(Theme.sans(17, observer.overlayJoints.isEmpty ? .light : .bold))
                 .foregroundStyle(observer.overlayJoints.isEmpty ? Theme.muted : Theme.text)
             Text(observer.poseText)
                 .font(Theme.mono(10))
-                .foregroundStyle(Theme.muted)
+                .foregroundStyle(Theme.dim)
             if observer.mode == .sharedMap && !observer.remoteText.isEmpty {
                 let hidden = observer.remoteText.contains("behind")
-                HStack(alignment: .top, spacing: 6) {
-                    Text(hidden ? "▲" : "●").foregroundStyle(hidden ? Theme.red : Theme.green)
-                    Text(observer.remoteText.uppercased()).foregroundStyle(hidden ? Theme.red : Theme.text)
+                HStack(spacing: 10) {
+                    Text(hidden ? "!" : "●")
+                        .font(.system(size: 12, weight: .heavy))
+                        .foregroundStyle(.black)
+                        .frame(width: 24, height: 24)
+                        .background(RoundedRectangle(cornerRadius: 7).fill(hidden ? Theme.blaze : Theme.live))
+                    Text(observer.remoteText.uppercased())
+                        .font(Theme.mono(11, .semibold))
+                        .foregroundStyle(hidden ? Theme.blaze2 : Theme.text)
                 }
-                .font(Theme.mono(10, .semibold))
-                .padding(8)
+                .padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background((hidden ? Theme.red : Theme.green).opacity(0.08))
-                .overlay(alignment: .leading) { Rectangle().fill(hidden ? Theme.red : Theme.green).frame(width: 2) }
+                .background(RoundedRectangle(cornerRadius: 14).fill((hidden ? Theme.blaze : Theme.live).opacity(0.12)))
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke((hidden ? Theme.blaze : Theme.live).opacity(0.45), lineWidth: 1))
             }
         }
-        .padding(10)
-        .background(Theme.panel2)
-        .overlay(Rectangle().stroke(Theme.line, lineWidth: 1))
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 18).fill(Theme.fill))
+        .overlay(RoundedRectangle(cornerRadius: 18).stroke(Theme.stroke, lineWidth: 1))
     }
 
     @ViewBuilder
@@ -202,7 +205,7 @@ struct ContentView: View {
             Button { observer.joinSharedMap() } label: {
                 Label(observer.mode == .sharedMap ? "Re-join map" : "Join map", systemImage: "map")
             }
-            .buttonStyle(TacticalButtonStyle(tint: Theme.blue))
+            .buttonStyle(TacticalButtonStyle(tint: Theme.text))
             if RoomScanner.isSupported {
                 Button { observer.startScan() } label: {
                     Label("Scan", systemImage: "cube.transparent")
@@ -213,68 +216,77 @@ struct ContentView: View {
         if observer.mode != .calibratedRoom {
             HStack(spacing: 8) {
                 Button(observer.showRoomWalls ? "Walls on" : "Walls off") { observer.showRoomWalls.toggle() }
-                .buttonStyle(TacticalButtonStyle(tint: observer.showRoomWalls ? Theme.blue : Theme.dim))
+                    .buttonStyle(TacticalButtonStyle(tint: observer.showRoomWalls ? Theme.sky : Theme.dim))
                 Button("Leave map") { observer.leaveSharedMap() }
-                    .buttonStyle(TacticalButtonStyle(tint: Theme.red))
+                    .buttonStyle(TacticalButtonStyle(tint: Theme.blaze))
             }
         }
         Button {
             observer.calibrate()
         } label: {
-            Text(calibrateTitle)
+            HStack(spacing: 10) {
+                Text(calibrateTitle)
+                Spacer(minLength: 0)
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(.black)
+                    .frame(width: 32, height: 32)
+                    .background(Circle().fill(Theme.blaze))
+            }
+            .padding(.leading, 8)
+            .padding(.vertical, -6)
+            .padding(.trailing, -6)
         }
-        .buttonStyle(TacticalButtonStyle(tint: observer.mode == .calibratedRoom && !observer.calibrated ? Theme.blue : Theme.steel,
-                                         filled: observer.mode == .calibratedRoom && !observer.calibrated))
+        .buttonStyle(TacticalButtonStyle(tint: Theme.text, filled: true))
     }
 
     private var calibrateTitle: String {
         if observer.mode != .calibratedRoom { return "Leave map & calibrate here" }
-        return observer.calibrated ? "✓ Calibrated — recalibrate" : "Calibrate (beside laptop webcam)"
+        return observer.calibrated ? "Calibrated — recalibrate" : "Calibrate beside laptop"
     }
 
     @ViewBuilder
     private var scanPanel: some View {
         let scanner = observer.scanner
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: 12) {
             ScanPlanView(walls: scanner.planWalls, openings: scanner.planOpenings, pose: observer.planPose)
                 .frame(width: 130, height: 130)
             VStack(alignment: .leading, spacing: 6) {
                 SectionLabel(text: "Structure capture")
-                HStack(spacing: 5) {
-                    Text("ROOMS").foregroundStyle(Theme.dim)
-                    Text("\(scanner.roomsCaptured)").foregroundStyle(Theme.text)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text("\(scanner.roomsCaptured)").font(Theme.sans(30, .heavy)).foregroundStyle(Theme.text)
+                    Text("ROOMS").font(Theme.mono(10, .semibold)).foregroundStyle(Theme.dim)
                 }
-                .font(Theme.mono(11, .semibold))
                 Text("Walls draw in AR as they are captured. Cover every wall and corner.")
-                    .font(Theme.mono(10))
+                    .font(Theme.sans(12))
                     .foregroundStyle(Theme.muted)
                 if !scanner.liveSummary.isEmpty {
-                    Text(scanner.liveSummary.uppercased()).font(Theme.mono(10, .semibold)).foregroundStyle(Theme.blue)
+                    Text(scanner.liveSummary).font(Theme.mono(10, .semibold)).foregroundStyle(Theme.sky)
                 }
             }
         }
         if !scanner.instruction.isEmpty {
-            Text("▲ " + scanner.instruction.uppercased()).font(Theme.mono(10, .semibold)).foregroundStyle(Theme.amber)
+            Tag(text: scanner.instruction, color: Theme.blaze)
         }
         switch scanner.state {
         case .scanning:
-            scanButton("Finish this room", tint: Theme.blue) { observer.finishRoom() }
+            scanButton("Finish this room", tint: Theme.text) { observer.finishRoom() }
         case .processing:
-            ProgressView("PROCESSING ROOM…").font(Theme.mono(10)).tint(Theme.blue)
+            ProgressView("Processing room…").font(Theme.mono(11)).tint(Theme.blaze)
         case .roomReady:
             HStack(spacing: 8) {
                 Button("Next room") { observer.nextRoom() }
                     .buttonStyle(TacticalButtonStyle(tint: Theme.text))
-                scanButton("Save & share", tint: Theme.blue) { observer.uploadScan() }
+                scanButton("Save & share", tint: Theme.blaze) { observer.uploadScan() }
             }
         case .failed(let message):
-            Text(message.uppercased()).font(Theme.mono(10, .semibold)).foregroundStyle(Theme.red)
-            scanButton("Try again", tint: Theme.amber) { observer.cancelScan(); observer.startScan() }
+            Text(message).font(Theme.mono(11, .semibold)).foregroundStyle(Theme.blaze2)
+            scanButton("Try again", tint: Theme.blaze) { observer.cancelScan(); observer.startScan() }
         case .idle:
             EmptyView()
         }
         Button("Abort scan") { observer.cancelScan() }
-            .buttonStyle(TacticalButtonStyle(tint: Theme.red))
+            .buttonStyle(TacticalButtonStyle(tint: Theme.blaze))
     }
 
     private func scanButton(_ title: String, tint: Color, action: @escaping () -> Void) -> some View {
@@ -283,24 +295,19 @@ struct ContentView: View {
     }
 }
 
-/// The Xenon hexagon mark.
+/// The Xenon mark: blaze rounded square with a black ✕ (same as the web favicon).
 struct XenonMark: View {
     var body: some View {
-        Canvas { context, size in
-            let w = size.width, h = size.height
-            var hex = Path()
-            hex.move(to: CGPoint(x: w / 2, y: 1))
-            hex.addLine(to: CGPoint(x: w - 1, y: h * 0.27))
-            hex.addLine(to: CGPoint(x: w - 1, y: h * 0.73))
-            hex.addLine(to: CGPoint(x: w / 2, y: h - 1))
-            hex.addLine(to: CGPoint(x: 1, y: h * 0.73))
-            hex.addLine(to: CGPoint(x: 1, y: h * 0.27))
-            hex.closeSubpath()
-            context.stroke(hex, with: .color(Theme.blue), lineWidth: 1.8)
-            var x = Path()
-            x.move(to: CGPoint(x: w * 0.33, y: h * 0.33)); x.addLine(to: CGPoint(x: w * 0.67, y: h * 0.67))
-            x.move(to: CGPoint(x: w * 0.67, y: h * 0.33)); x.addLine(to: CGPoint(x: w * 0.33, y: h * 0.67))
-            context.stroke(x, with: .color(Theme.text), lineWidth: 1.8)
+        GeometryReader { geo in
+            let s = geo.size.width
+            ZStack {
+                RoundedRectangle(cornerRadius: s * 0.3, style: .continuous).fill(Theme.blaze)
+                Path { p in
+                    p.move(to: CGPoint(x: s * 0.3, y: s * 0.3)); p.addLine(to: CGPoint(x: s * 0.7, y: s * 0.7))
+                    p.move(to: CGPoint(x: s * 0.7, y: s * 0.3)); p.addLine(to: CGPoint(x: s * 0.3, y: s * 0.7))
+                }
+                .stroke(Color.black, lineWidth: s * 0.11)
+            }
         }
     }
 }
@@ -316,7 +323,7 @@ struct ScanPlanView: View {
         Canvas { context, size in
             let points = (walls + openings).flatMap { [$0.a, $0.b] } + (pose.map { [SIMD2($0.x, $0.y)] } ?? [])
             guard !points.isEmpty else {
-                context.draw(Text("ACQUIRING…").font(Theme.mono(9)).foregroundColor(Theme.muted),
+                context.draw(Text("Acquiring…").font(Theme.mono(9)).foregroundColor(Theme.muted),
                              at: CGPoint(x: size.width / 2, y: size.height / 2))
                 return
             }
@@ -327,7 +334,7 @@ struct ScanPlanView: View {
             func pt(_ p: SIMD2<Float>) -> CGPoint {
                 CGPoint(x: CGFloat((p.x - minP.x) * scale), y: CGFloat((p.y - minP.y) * scale))
             }
-            for (segments, color, width) in [(walls, Theme.steel, 3.0), (openings, Theme.amber, 4.0)] {
+            for (segments, color, width) in [(walls, Theme.steel, 3.0), (openings, Theme.blaze2, 4.0)] {
                 var path = Path()
                 for s in segments { path.move(to: pt(s.a)); path.addLine(to: pt(s.b)) }
                 context.stroke(path, with: .color(color), lineWidth: width)
@@ -338,8 +345,8 @@ struct ScanPlanView: View {
                 var arrow = Path()
                 arrow.move(to: c)
                 arrow.addLine(to: CGPoint(x: c.x + dir.x, y: c.y + dir.y))
-                context.stroke(arrow, with: .color(Theme.blue), lineWidth: 2)
-                context.fill(Path(CGRect(x: c.x - 4, y: c.y - 4, width: 8, height: 8)), with: .color(Theme.blue))
+                context.stroke(arrow, with: .color(Theme.blaze), lineWidth: 2)
+                context.fill(Path(ellipseIn: CGRect(x: c.x - 4, y: c.y - 4, width: 8, height: 8)), with: .color(Theme.blaze))
             }
         }
         .background {
@@ -351,11 +358,12 @@ struct ScanPlanView: View {
                     grid.move(to: CGPoint(x: x, y: 0)); grid.addLine(to: CGPoint(x: x, y: size.height))
                     grid.move(to: CGPoint(x: 0, y: y)); grid.addLine(to: CGPoint(x: size.width, y: y))
                 }
-                context.stroke(grid, with: .color(Theme.line), lineWidth: 0.5)
+                context.stroke(grid, with: .color(Theme.stroke), lineWidth: 0.5)
             }
-            .background(Color.black.opacity(0.7))
+            .background(Color.black.opacity(0.6))
         }
-        .overlay(Rectangle().stroke(Theme.line2, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Theme.stroke2, lineWidth: 1))
     }
 }
 
@@ -415,12 +423,12 @@ struct SkeletonOverlay: View {
         context.stroke(path, with: .color(color), lineWidth: 2.5)
         for joint in joints {
             let r: CGFloat = 4.5
-            let dot = Path(CGRect(x: joint.point.x - r, y: joint.point.y - r, width: 2 * r, height: 2 * r))
+            let dot = Path(ellipseIn: CGRect(x: joint.point.x - r, y: joint.point.y - r, width: 2 * r, height: 2 * r))
             // Hollow dot = no LiDAR depth at that joint (not sent to the hub).
             if joint.hasDepth {
                 context.fill(dot, with: .color(color))
             } else {
-                context.stroke(dot, with: .color(Theme.red), lineWidth: 2)
+                context.stroke(dot, with: .color(Theme.blaze), lineWidth: 2)
             }
         }
     }

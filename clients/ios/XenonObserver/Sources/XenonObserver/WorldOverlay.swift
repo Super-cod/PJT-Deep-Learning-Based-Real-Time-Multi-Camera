@@ -56,7 +56,7 @@ final class WorldOverlay {
         }
         for door in room.doors ?? [] {
             roomNode.addChildNode(surfaceNode(dimensions: door.dimensions.vec3, transform: Self.matrix(door.transform),
-                                              color: Theme.uiAmber, alpha: 0.18, isWall: false))
+                                              color: Theme.uiBlaze2, alpha: 0.18, isWall: false))
         }
     }
 
@@ -71,7 +71,7 @@ final class WorldOverlay {
         lastScanRender = now
         scanNode.childNodes.forEach { $0.removeFromParentNode() }
         let groups: [([CapturedRoom.Surface], UIColor, Float)] = [
-            (room.walls, Theme.uiSteel, 0.30), (room.doors, Theme.uiAmber, 0.55), (room.windows, Theme.uiBlue, 0.55), (room.openings, Theme.uiBlue, 0.4),
+            (room.walls, Theme.uiSteel, 0.30), (room.doors, Theme.uiBlaze2, 0.55), (room.windows, Theme.uiSky, 0.55), (room.openings, Theme.uiSky, 0.4),
         ]
         for (surfaces, color, alpha) in groups {
             for s in surfaces {
@@ -238,16 +238,19 @@ final class WorldOverlay {
         let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
         let size = (text as NSString).boundingRect(with: CGSize(width: 2000, height: 400), options: .usesLineFragmentOrigin,
                                                    attributes: attributes, context: nil).size
-        let canvas = CGSize(width: ceil(size.width) + 40, height: ceil(size.height) + 16)
-        return UIGraphicsImageRenderer(size: canvas).image { ctx in
-            // Square tactical tag: dark plate, thin border, colour bar on the left.
-            Theme.rgb(0x111418).withAlphaComponent(0.88).setFill()
-            ctx.fill(CGRect(origin: .zero, size: canvas))
-            Theme.rgb(0x404854).setStroke()
-            ctx.stroke(CGRect(origin: .zero, size: canvas).insetBy(dx: 1, dy: 1))
+        let canvas = CGSize(width: ceil(size.width) + 76, height: ceil(size.height) + 24)
+        return UIGraphicsImageRenderer(size: canvas).image { _ in
+            // Pill tag: dark glass, hairline border, coloured dot — same as the web console.
+            let plate = UIBezierPath(roundedRect: CGRect(origin: .zero, size: canvas).insetBy(dx: 1, dy: 1),
+                                     cornerRadius: min(canvas.height / 2, 30))
+            UIColor(red: 0.055, green: 0.055, blue: 0.063, alpha: 0.86).setFill()
+            plate.fill()
+            UIColor(white: 1, alpha: 0.16).setStroke()
+            plate.lineWidth = 2
+            plate.stroke()
             color.setFill()
-            ctx.fill(CGRect(x: 0, y: 0, width: 8, height: canvas.height))
-            (text as NSString).draw(with: CGRect(x: 22, y: 8, width: size.width, height: size.height),
+            UIBezierPath(ovalIn: CGRect(x: 22, y: canvas.height / 2 - 8, width: 16, height: 16)).fill()
+            (text as NSString).draw(with: CGRect(x: 52, y: 12, width: size.width, height: size.height),
                                     options: .usesLineFragmentOrigin, attributes: attributes, context: nil)
         }
     }
@@ -393,7 +396,7 @@ private final class PersonNode {
         labelText = text
         let position = label?.simdPosition
         label?.removeFromParentNode()
-        let node = WorldOverlay.labelNode(text, color: warning ? Theme.uiRed : color)
+        let node = WorldOverlay.labelNode(text, color: warning ? Theme.uiBlaze2 : color)
         if let position { node.simdPosition = position }
         label = node
         root.addChildNode(node)
