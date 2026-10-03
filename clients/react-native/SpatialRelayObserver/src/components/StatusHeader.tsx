@@ -1,9 +1,11 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import type { WsStatus } from '../hooks/useWebSocket';
+import { MONO_FONT } from '../lib/fonts';
 
 interface Props {
   wsStatus: WsStatus;
+  wsUrl: string | null;
   mediaPipeStatus: 'idle' | 'loading' | 'ready' | 'error';
   poseX: number;
   poseZ: number;
@@ -34,6 +36,7 @@ const MP_COLORS: Record<string, string> = {
 
 export function StatusHeader({
   wsStatus,
+  wsUrl,
   mediaPipeStatus,
   poseX,
   poseZ,
@@ -52,6 +55,9 @@ export function StatusHeader({
           {wsStatus === 'connected' ? 'HUB' : wsStatus.toUpperCase()}
         </Text>
       </TouchableOpacity>
+      {wsStatus !== 'connected' && wsUrl && (
+        <Text style={styles.urlText} numberOfLines={1}>{wsUrl.replace(/^wss?:\/\//, '').replace('/ws/observer', '')}</Text>
+      )}
 
       {/* Centre: pose readout */}
       <View style={styles.poseBlock}>
@@ -94,7 +100,13 @@ const styles = StyleSheet.create({
   wsText: {
     fontSize: 12,
     fontWeight: '600',
-    fontFamily: 'monospace',
+    fontFamily: MONO_FONT,
+  },
+  urlText: {
+    color: '#777',
+    fontSize: 10,
+    fontFamily: MONO_FONT,
+    maxWidth: 110,
   },
   poseBlock: {
     flex: 1,
@@ -103,11 +115,11 @@ const styles = StyleSheet.create({
   poseText: {
     color: '#e0e0e0',
     fontSize: 12,
-    fontFamily: 'monospace',
+    fontFamily: MONO_FONT,
   },
   mpText: {
     fontSize: 11,
-    fontFamily: 'monospace',
+    fontFamily: MONO_FONT,
     marginTop: 2,
   },
   settingsBtn: {

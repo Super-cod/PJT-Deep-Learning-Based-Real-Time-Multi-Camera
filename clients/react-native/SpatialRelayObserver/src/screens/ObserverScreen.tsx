@@ -9,137 +9,174 @@ import {
   View,
   TouchableOpacity,
   Text,
-  Alert,
-  Platform,
+  Linking,
+  AppState,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import WebView, { WebViewMessageEvent } from 'react-native-webview';
-import { Camera } from 'expo-camera';
-import { DeviceMotion } from 'expo-sensors';
+import { useCameraPermissions } from 'expo-camera';
+import { useKeepAwake } from 'expo-keep-awake';
 
 import { CAMERA_VIEW_HTML } from '../lib/cameraWebView';
-import { toPhonePoint } from '../lib/geometry';
+import { clamp, focalLength, toPhonePoint } from '../lib/geometry';
 import {
   buildWsUrl,
   loadSettings,
   saveSettings,
   type ServerSettings,
 } from '../lib/storage';
-import type { PhoneJoint } from '../lib/protocol';
+import type { InboundPacket, LocalPose, OutboundPacket, PhoneJoint } from '../lib/protocol';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useDeviceMotion } from '../hooks/useDeviceMotion';
 import { StatusHeader } from '../components/StatusHeader';
 import { DPad } from '../components/DPad';
 import { RangeSlider } from '../components/RangeSlider';
 import { SettingsModal } from '../modals/SettingsModal';
+import { MONO_FONT } from '../lib/fonts';
 
 // ── WebView message shapes ────────────────────────────────────────────────────
-interface LandmarksMsg {
-  type: 'landmarks';
+interface FrameSize { width: number; height: number }
+interface WebPerson {
   joints: Array<{ name: string; x: number; y: number; confidence: number }>;
   target: { x: number; y: number };
-  depth: number;
+  torso: { metres: number; pixels: number } | null;
 }
-interface TapMsg        { type: 'tap'; x: number; y: number }
-interface CameraReadyMsg { type: 'camera_ready' }
+interface PeopleMsg extends FrameSize {
+  type: 'people';
+  people: WebPerson[];
+}
+interface TapMsg extends FrameSize { type: 'tap'; x: number; y: number }
+interface CameraReadyMsg extends FrameSize { type: 'camera_ready' }
+interface CameraErrorMsg { type: 'camera_error'; message: string }
 interface MPLoadingMsg  { type: 'mediapipe_loading' }
 interface MPReadyMsg    { type: 'mediapipe_ready' }
 interface MPErrorMsg    { type: 'mediapipe_error'; message: string }
+interface LogMsg        { type: 'log'; message: string }
 type WebViewMsg =
-  | LandmarksMsg | TapMsg | CameraReadyMsg
-  | MPLoadingMsg | MPReadyMsg | MPErrorMsg;
+  | PeopleMsg | TapMsg | CameraReadyMsg | CameraErrorMsg
+  | MPLoadingMsg | MPReadyMsg | MPErrorMsg | LogMsg;
 
 type MPStatus = 'idle' | 'loading' | 'ready' | 'error';
 
+// Stable object identity so re-renders never make the WebView reload.
+const WEBVIEW_SOURCE = { html: CAMERA_VIEW_HTML, baseUrl: 'https://localhost' };
+const POSE_INTERVAL_MS = 40; // 25 Hz
+const IDENTITY_POSE = (timestampNs: number): LocalPose => ({
+  position: [0, 0, 0],
+  quaternionXyzw: [0, 0, 0, 1],
+  timestampNs,
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 export function ObserverScreen() {
+  useKeepAwake(); // screen must stay on while streaming
+
   // ── Settings + WebSocket ──────────────────────────────────────────────────
-  const [settings, setSettings] = useState<ServerSettings>({
-    host: '172.20.10.2',
-    port: 8000,
-    useWss: false,
-  });
-  const [wsUrl, setWsUrl] = useState(() => buildWsUrl(settings));
-  const { status: wsStatus, send, reconnect } = useWebSocket(wsUrl);
+  const [settings, setSettings] = useState<ServerSettings | null>(null);
+  const wsUrl = settings ? buildWsUrl(settings) : null;
 
   // ── Sensor ────────────────────────────────────────────────────────────────
   const motion = useDeviceMotion();
+  const { getSnapshot, calibrate: calibrateMotion, resetPosition, adjustPosition } = motion;
 
-  // ── Phone position & orientation (dynamic from motion sensors) ──────────
-  const posRef = useRef(motion.position);
-  useEffect(() => { posRef.current = motion.position; }, [motion.position]);
-
-  // ── Depth slider ─────────────────────────────────────────────────────────
+  // ── Depth ────────────────────────────────────────────────────────────────
   const [depth, setDepth] = useState(2.0);
+  const [autoDepth, setAutoDepth] = useState(true);
   const depthRef = useRef(depth);
-  useEffect(() => { depthRef.current = depth; }, [depth]);
+  const autoDepthRef = useRef(autoDepth);
+  autoDepthRef.current = autoDepth;
 
-  // ── MediaPipe status ──────────────────────────────────────────────────────
+  // ── UI status ─────────────────────────────────────────────────────────────
   const [mpStatus, setMpStatus] = useState<MPStatus>('idle');
+  const [mpError, setMpError] = useState<string | null>(null);
+  const [cameraError, setCameraError] = useState<string | null>(null);
   const [calibrated, setCalibrated] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [cameraReady, setCameraReady] = useState(false);
   const webViewRef = useRef<WebView>(null);
   const sequenceRef = useRef(0);
+  const lastDepthUiUpdate = useRef(0);
 
-  // ── Camera permission ─────────────────────────────────────────────────────
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+
+  // ── Packets ───────────────────────────────────────────────────────────────
+  const sendRef = useRef<(p: OutboundPacket) => void>(() => {});
+  const nextSeq = () => ++sequenceRef.current;
+
+  const sendPose = useCallback(() => {
+    const snap = getSnapshot();
+    const now = Date.now();
+    sendRef.current({
+      type: 'pose',
+      sequence: nextSeq(),
+      localPose: {
+        position: [snap.position.x, snap.position.y, snap.position.z],
+        quaternionXyzw: snap.quaternionXyzw,
+        timestampNs: now * 1_000_000,
+      },
+    });
+  }, [getSnapshot]);
+
+  // Calibrate: phone becomes the origin (0,0,0) and its heading becomes +Z.
+  const calibrate = useCallback(() => {
+    calibrateMotion();
+    sendRef.current({ type: 'calibration', localPose: IDENTITY_POSE(Date.now() * 1_000_000) });
+    sendPose();
+    setCalibrated(true);
+  }, [calibrateMotion, sendPose]);
+
+  const onHubMessage = useCallback((packet: InboundPacket) => {
+    if (packet.type === 'calibrate') calibrate();
+    else if (packet.type === 'error') console.warn('[hub]', packet.message);
+  }, [calibrate]);
+
+  const { status: wsStatus, send, reconnect } = useWebSocket(wsUrl, onHubMessage);
+  sendRef.current = send;
+
+  // ── Load saved settings (connect only once we know the host) ──────────────
   useEffect(() => {
-    (async () => {
-      const { status } = await Camera.requestCameraPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert(
-          'Camera permission required',
-          'Open Settings → Spatial Relay Observer → Camera and enable access.',
-        );
-      }
-    })();
+    loadSettings().then(setSettings);
   }, []);
 
-  // ── DeviceMotion permission (iOS 13+) ─────────────────────────────────────
+  // ── Camera permission (must be granted before the WebView calls getUserMedia)
   useEffect(() => {
-    if (Platform.OS === 'ios') {
-      DeviceMotion.requestPermissionsAsync().catch(() => {});
+    if (cameraPermission && !cameraPermission.granted && cameraPermission.canAskAgain) {
+      requestCameraPermission();
+    }
+  }, [cameraPermission, requestCameraPermission]);
+
+  // ── Restart camera when returning from background ────────────────────────
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        webViewRef.current?.postMessage(JSON.stringify({ type: 'restart_camera' }));
+      }
+    });
+    return () => sub.remove();
+  }, []);
+
+  // ── Continuous pose broadcast at 25 Hz (reads refs → never re-created) ────
+  useEffect(() => {
+    if (wsStatus !== 'connected') return;
+    const id = setInterval(sendPose, POSE_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [wsStatus, sendPose]);
+
+  // ── Depth helpers ─────────────────────────────────────────────────────────
+  const applyDepth = useCallback((value: number, fromUser: boolean) => {
+    depthRef.current = value;
+    webViewRef.current?.postMessage(JSON.stringify({ type: 'set_depth', value }));
+    // Throttle re-renders for auto depth (arrives at up to 20 Hz).
+    const now = Date.now();
+    if (fromUser || now - lastDepthUiUpdate.current > 250) {
+      lastDepthUiUpdate.current = now;
+      setDepth(value);
     }
   }, []);
 
-  // ── Load saved settings ───────────────────────────────────────────────────
-  useEffect(() => {
-    loadSettings().then((s) => {
-      setSettings(s);
-      setWsUrl(buildWsUrl(s));
-    });
-  }, []);
-
-  // ── Periodic pose broadcast at 25 Hz ─────────────────────────────────────
-  useEffect(() => {
-    const id = setInterval(() => {
-      const p = posRef.current;
-      const q = motion.quaternionXyzw;
-      const seq = Date.now();
-      sequenceRef.current += 1;
-
-      // Send manual_pose to update server's explicit room coordinates
-      send({
-        type: 'manual_pose',
-        sequence: seq,
-        position: [p.x, p.y, p.z],
-        yawRad: motion.yawRad,
-        yawDeg: motion.yawDeg,
-      });
-
-      // Send pose for 6-DoF AR quaternion fusion
-      send({
-        type: 'pose',
-        sequence: seq,
-        localPose: {
-          position: [p.x, p.y, p.z],
-          quaternionXyzw: q,
-          timestampNs: seq * 1_000_000,
-        },
-      });
-    }, 40);
-    return () => clearInterval(id);
-  }, [send, motion.quaternionXyzw, motion.yawRad, motion.yawDeg]);
+  const handleDepthChange = useCallback((value: number) => {
+    setAutoDepth(false);
+    applyDepth(value, true);
+  }, [applyDepth]);
 
   // ── WebView → React Native messages ─────────────────────────────────────
   const onWebViewMessage = useCallback(
@@ -150,56 +187,64 @@ export function ObserverScreen() {
 
       switch (msg.type) {
         case 'camera_ready':
-          setCameraReady(true);
+          setCameraError(null);
           break;
-
+        case 'camera_error':
+          setCameraError(msg.message);
+          break;
         case 'mediapipe_loading':
           setMpStatus('loading');
+          setMpError(null);
           break;
-
         case 'mediapipe_ready':
           setMpStatus('ready');
           break;
-
         case 'mediapipe_error':
           setMpStatus('error');
+          setMpError(msg.message);
+          break;
+        case 'log':
+          console.log('[webview]', msg.message);
           break;
 
-        case 'landmarks': {
-          const { joints, target } = msg;
-          const p = posRef.current;
-          const d = depthRef.current;
-          sequenceRef.current += 1;
-
-          const positionPhone = toPhonePoint(target.x, target.y, d);
-          const jointsPhone: PhoneJoint[] = joints.map((j) => ({
-            name: j.name,
-            position: toPhonePoint(j.x, j.y, d),
-            confidence: j.confidence,
-          }));
-
-          send({
-            type: 'detection',
-            sequence: sequenceRef.current,
-            subjectId: 'person_01',
+        case 'people': {
+          const { people, width, height } = msg;
+          const f = focalLength(width, height);
+          // Slider/auto depth tracks the first person; others use their own torso estimate.
+          if (autoDepthRef.current && people[0]?.torso) {
+            const est = (f * people[0].torso.metres) / people[0].torso.pixels;
+            // Low-pass filter the estimate to suppress per-frame jitter.
+            applyDepth(clamp(depthRef.current * 0.7 + est * 0.3, 0.5, 12), false);
+          }
+          sendRef.current({
+            type: 'detections',
+            sequence: nextSeq(),
             timestampNs: Date.now() * 1_000_000,
-            positionPhone,
-            jointsPhone,
-            confidence: 0.85,
+            people: people.map((person, i) => {
+              const d = i > 0 && autoDepthRef.current && person.torso
+                ? clamp((f * person.torso.metres) / person.torso.pixels, 0.5, 12)
+                : depthRef.current;
+              return {
+                positionPhone: toPhonePoint(person.target.x, person.target.y, d, width, height),
+                jointsPhone: person.joints.map((j): PhoneJoint => ({
+                  name: j.name,
+                  position: toPhonePoint(j.x, j.y, d, width, height),
+                  confidence: j.confidence,
+                })),
+                confidence: 0.85,
+              };
+            }),
           });
           break;
         }
 
         case 'tap': {
-          const d = depthRef.current;
-          const positionPhone = toPhonePoint(msg.x, msg.y, d);
-          sequenceRef.current += 1;
-          send({
+          sendRef.current({
             type: 'detection',
-            sequence: sequenceRef.current,
+            sequence: nextSeq(),
             subjectId: 'target_01',
             timestampNs: Date.now() * 1_000_000,
-            positionPhone,
+            positionPhone: toPhonePoint(msg.x, msg.y, depthRef.current, msg.width, msg.height),
             jointsPhone: [],
             confidence: 0.7,
           });
@@ -207,118 +252,89 @@ export function ObserverScreen() {
         }
       }
     },
-    [send],
+    [applyDepth],
   );
 
-  // ── Notify WebView when depth changes ────────────────────────────────────
-  const notifyDepthChange = useCallback((value: number) => {
-    webViewRef.current?.postMessage(
-      JSON.stringify({ type: 'set_depth', value }),
-    );
-  }, []);
-
-  const handleDepthChange = useCallback(
-    (value: number) => {
-      setDepth(value);
-      depthRef.current = value;
-      notifyDepthChange(value);
-    },
-    [notifyDepthChange],
-  );
-
-  // ── D-pad (Fine-tuning manual nudge) ─────────────────────────────────────
+  // ── D-pad (fine-tuning manual nudge) ─────────────────────────────────────
   const handleMove = useCallback((axis: 'x' | 'z', delta: number) => {
-    motion.adjustPosition(axis, delta);
-    const p = posRef.current;
-    const nx = Math.round((p.x + (axis === 'x' ? delta : 0)) * 100) / 100;
-    const nz = Math.round((p.z + (axis === 'z' ? delta : 0)) * 100) / 100;
-    const seq = Date.now();
-    send({
-      type: 'manual_pose',
-      sequence: seq,
-      position: [nx, p.y, nz],
-      yawRad: motion.yawRad,
-      yawDeg: motion.yawDeg,
-    });
-    send({
-      type: 'pose',
-      sequence: seq,
-      localPose: {
-        position: [nx, p.y, nz],
-        quaternionXyzw: motion.quaternionXyzw,
-        timestampNs: seq * 1_000_000,
-      },
-    });
-  }, [motion.adjustPosition, motion.yawRad, motion.yawDeg, motion.quaternionXyzw, send]);
+    adjustPosition(axis, delta);
+    sendPose();
+  }, [adjustPosition, sendPose]);
 
   const handleReset = useCallback(() => {
-    motion.resetPosition();
-    const seq = Date.now();
-    send({
-      type: 'manual_pose',
-      sequence: seq,
-      position: [0, 0, 0],
-      yawRad: motion.yawRad,
-      yawDeg: motion.yawDeg,
-    });
-    send({
-      type: 'pose',
-      sequence: seq,
-      localPose: {
-        position: [0, 0, 0],
-        quaternionXyzw: motion.quaternionXyzw,
-        timestampNs: seq * 1_000_000,
-      },
-    });
-  }, [motion.resetPosition, motion.yawRad, motion.yawDeg, motion.quaternionXyzw, send]);
-
-  // ── Calibrate (Zero origin (0,0,0) and lock heading) ─────────────────────
-  const handleCalibrate = useCallback(() => {
-    motion.calibrate();
-    const seq = Date.now();
-    send({
-      type: 'calibration',
-      localPose: {
-        position: [0, 0, 0],
-        quaternionXyzw: [0, 0, 0, 1],
-        timestampNs: seq * 1_000_000,
-      },
-    });
-    send({
-      type: 'manual_pose',
-      sequence: seq,
-      position: [0, 0, 0],
-      yawRad: 0,
-      yawDeg: 0,
-    });
-    send({
-      type: 'pose',
-      sequence: seq,
-      localPose: {
-        position: [0, 0, 0],
-        quaternionXyzw: [0, 0, 0, 1],
-        timestampNs: seq * 1_000_000,
-      },
-    });
-    setCalibrated(true);
-  }, [send, motion.calibrate]);
+    resetPosition();
+    sendPose();
+  }, [resetPosition, sendPose]);
 
   // ── Enable MediaPipe detection ────────────────────────────────────────────
   const handleEnableDetection = useCallback(() => {
-    webViewRef.current?.postMessage(
-      JSON.stringify({ type: 'start_detection' }),
-    );
+    webViewRef.current?.postMessage(JSON.stringify({ type: 'start_detection' }));
     setMpStatus('loading');
   }, []);
 
   // ── Save settings ─────────────────────────────────────────────────────────
   const handleSaveSettings = useCallback(async (s: ServerSettings) => {
     await saveSettings(s);
-    setSettings(s);
-    const url = buildWsUrl(s);
-    setWsUrl(url);
     setShowSettings(false);
-  }, []);
+    // A changed URL reconnects via useWebSocket's effect; an unchanged one needs a manual kick.
+    if (buildWsUrl(s) === wsUrl) reconnect();
+    setSettings(s);
+  }, [reconnect, wsUrl]);
+
+  // ── Camera area ───────────────────────────────────────────────────────────
+  let cameraArea: React.ReactNode;
+  if (!cameraPermission) {
+    cameraArea = <Text style={styles.notice}>Checking camera permission…</Text>;
+  } else if (!cameraPermission.granted) {
+    cameraArea = (
+      <View style={styles.noticeBox}>
+        <Text style={styles.notice}>Camera access is needed to detect people.</Text>
+        <TouchableOpacity
+          style={styles.actionBtn}
+          onPress={() => (cameraPermission.canAskAgain ? requestCameraPermission() : Linking.openSettings())}
+        >
+          <Text style={styles.actionBtnText}>
+            {cameraPermission.canAskAgain ? 'Allow camera' : 'Open Settings'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+    );
+  } else {
+    cameraArea = (
+      <>
+        <WebView
+          ref={webViewRef}
+          style={styles.webview}
+          source={WEBVIEW_SOURCE}
+          originWhitelist={['*']}
+          // ── iOS camera inside WKWebView ─────────────────────────────
+          mediaCapturePermissionGrantType="grant"
+          allowsInlineMediaPlayback
+          mediaPlaybackRequiresUserAction={false}
+          // ── JS + storage ────────────────────────────────────────────
+          javaScriptEnabled
+          domStorageEnabled
+          mixedContentMode="always"
+          // ── Messages ────────────────────────────────────────────────
+          onMessage={onWebViewMessage}
+          // ── Recover if iOS kills the web content process ────────────
+          onContentProcessDidTerminate={() => webViewRef.current?.reload()}
+          // ── Scrolling off ───────────────────────────────────────────
+          scrollEnabled={false}
+          bounces={false}
+          overScrollMode="never"
+        />
+        {cameraError && (
+          <TouchableOpacity
+            style={styles.cameraErrorBanner}
+            onPress={() => webViewRef.current?.postMessage(JSON.stringify({ type: 'restart_camera' }))}
+          >
+            <Text style={styles.cameraErrorText}>Camera error: {cameraError} — tap to retry</Text>
+          </TouchableOpacity>
+        )}
+      </>
+    );
+  }
 
   // ─────────────────────────────────────────────────────────────────────────
   return (
@@ -326,6 +342,7 @@ export function ObserverScreen() {
       {/* ── Status bar ─────────────────────────────────────────────────── */}
       <StatusHeader
         wsStatus={wsStatus}
+        wsUrl={wsUrl}
         mediaPipeStatus={mpStatus}
         poseX={motion.position.x}
         poseZ={motion.position.z}
@@ -335,38 +352,20 @@ export function ObserverScreen() {
       />
 
       {/* ── Full-screen camera WebView ────────────────────────────────── */}
-      <View style={styles.cameraContainer}>
-        <WebView
-          ref={webViewRef}
-          style={StyleSheet.absoluteFill}
-          source={{ html: CAMERA_VIEW_HTML, baseUrl: 'https://localhost' }}
-          // ── iOS camera permissions ──────────────────────────────────
-          mediaCapturePermissionGrantType="grant"
-          allowsInlineMediaPlayback
-          mediaPlaybackRequiresUserAction={false}
-          // ── JS + storage ────────────────────────────────────────────
-          javaScriptEnabled
-          domStorageEnabled
-          originWhitelist={['*']}
-          mixedContentMode="always"
-          // ── Performance ─────────────────────────────────────────────
-          renderToHardwareTextureAndroid
-          // ── Messages ────────────────────────────────────────────────
-          onMessage={onWebViewMessage}
-          // ── Scrolling off ───────────────────────────────────────────
-          scrollEnabled={false}
-          bounces={false}
-        />
-      </View>
+      <View style={styles.cameraContainer}>{cameraArea}</View>
 
       {/* ── Bottom controls panel ─────────────────────────────────────── */}
       <View style={styles.controls}>
         {/* Range / depth */}
-        <RangeSlider value={depth} onChange={handleDepthChange} />
+        <RangeSlider
+          value={depth}
+          onChange={handleDepthChange}
+          auto={autoDepth}
+          onToggleAuto={() => setAutoDepth((a) => !a)}
+        />
 
         {/* Action row */}
         <View style={styles.actionRow}>
-          {/* Enable detection */}
           {mpStatus === 'idle' || mpStatus === 'error' ? (
             <TouchableOpacity
               style={styles.actionBtn}
@@ -385,13 +384,9 @@ export function ObserverScreen() {
             </View>
           )}
 
-          {/* Calibrate */}
           <TouchableOpacity
-            style={[
-              styles.calibrateBtn,
-              calibrated && styles.calibratedBtn,
-            ]}
-            onPress={handleCalibrate}
+            style={[styles.calibrateBtn, calibrated && styles.calibratedBtn]}
+            onPress={calibrate}
             activeOpacity={0.7}
           >
             <Text style={styles.calibrateBtnText}>
@@ -399,6 +394,7 @@ export function ObserverScreen() {
             </Text>
           </TouchableOpacity>
         </View>
+        {mpError && <Text style={styles.errorText} numberOfLines={2}>{mpError}</Text>}
 
         {/* D-pad */}
         <DPad onMove={handleMove} onReset={handleReset} />
@@ -414,12 +410,14 @@ export function ObserverScreen() {
       </View>
 
       {/* ── Settings modal ────────────────────────────────────────────── */}
-      <SettingsModal
-        visible={showSettings}
-        settings={settings}
-        onSave={handleSaveSettings}
-        onClose={() => setShowSettings(false)}
-      />
+      {settings && (
+        <SettingsModal
+          visible={showSettings}
+          settings={settings}
+          onSave={handleSaveSettings}
+          onClose={() => setShowSettings(false)}
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -432,6 +430,42 @@ const styles = StyleSheet.create({
   cameraContainer: {
     flex: 1,
     backgroundColor: '#000',
+    justifyContent: 'center',
+  },
+  webview: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  noticeBox: {
+    paddingHorizontal: 24,
+    gap: 14,
+  },
+  notice: {
+    color: '#aaa',
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  cameraErrorBanner: {
+    position: 'absolute',
+    top: 10,
+    left: 10,
+    right: 10,
+    padding: 10,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,77,77,0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,77,77,0.5)',
+  },
+  cameraErrorText: {
+    color: '#ff8080',
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  errorText: {
+    color: '#ff8080',
+    fontSize: 11,
+    textAlign: 'center',
+    paddingHorizontal: 12,
   },
   controls: {
     backgroundColor: 'rgba(10,10,10,0.9)',
@@ -454,9 +488,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(186,250,89,0.3)',
     alignItems: 'center',
-  },
-  btnDisabled: {
-    opacity: 0.4,
   },
   actionBtnText: {
     color: '#bafa59',
@@ -484,7 +515,7 @@ const styles = StyleSheet.create({
   poseReadout: {
     color: '#555',
     fontSize: 11,
-    fontFamily: 'monospace',
+    fontFamily: MONO_FONT,
     textAlign: 'center',
     paddingHorizontal: 12,
   },

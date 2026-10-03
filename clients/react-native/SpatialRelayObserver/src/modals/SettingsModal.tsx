@@ -12,6 +12,7 @@ import {
   ScrollView,
 } from 'react-native';
 import type { ServerSettings } from '../lib/storage';
+import { MONO_FONT } from '../lib/fonts';
 
 interface Props {
   visible: boolean;
@@ -186,7 +187,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 15,
-    fontFamily: 'monospace',
+    fontFamily: MONO_FONT,
   },
   switchRow: {
     flexDirection: 'row',
@@ -197,7 +198,7 @@ const styles = StyleSheet.create({
   preview: {
     color: '#bafa59',
     fontSize: 12,
-    fontFamily: 'monospace',
+    fontFamily: MONO_FONT,
     textAlign: 'center',
     marginTop: 16,
     padding: 10,
@@ -212,7 +213,7 @@ const styles = StyleSheet.create({
   },
   code: {
     color: '#888',
-    fontFamily: 'monospace',
+    fontFamily: MONO_FONT,
     backgroundColor: '#1a1a1a',
   },
   saveBtn: {

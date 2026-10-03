@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { OutboundPacket } from '../lib/protocol';
+import type { InboundPacket, OutboundPacket } from '../lib/protocol';
 
 export type WsStatus = 'connecting' | 'connected' | 'disconnected';
 
@@ -11,8 +11,10 @@ export type WsStatus = 'connecting' | 'connected' | 'disconnected';
  *
  * The native WebSocket API is available in React Native without any imports.
  */
-export function useWebSocket(url: string) {
+export function useWebSocket(url: string | null, onMessage?: (packet: InboundPacket) => void) {
   const [status, setStatus] = useState<WsStatus>('disconnected');
+  const onMessageRef = useRef(onMessage);
+  onMessageRef.current = onMessage;
   const wsRef      = useRef<WebSocket | null>(null);
   const retryCount = useRef(0);
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -20,10 +22,11 @@ export function useWebSocket(url: string) {
   const mountedRef = useRef(true);
 
   // Track latest URL without triggering reconnect effect constantly
-  useEffect(() => { urlRef.current = url; }, [url]);
+  urlRef.current = url;
 
   const connect = useCallback(() => {
-    if (!mountedRef.current) return;
+    if (!mountedRef.current || !urlRef.current) return;
+    if (retryTimer.current) clearTimeout(retryTimer.current);
     // Close any existing socket
     if (wsRef.current) {
       wsRef.current.onclose = null; // prevent double-reconnect
@@ -49,6 +52,11 @@ export function useWebSocket(url: string) {
       retryTimer.current = setTimeout(connect, delay);
     };
 
+    ws.onmessage = (event) => {
+      if (!onMessageRef.current || typeof event.data !== 'string') return;
+      try { onMessageRef.current(JSON.parse(event.data) as InboundPacket); } catch {}
+    };
+
     ws.onerror = () => {
       // onclose will fire after onerror; no need to handle separately
     };
@@ -61,7 +69,12 @@ export function useWebSocket(url: string) {
     return () => {
       mountedRef.current = false;
       if (retryTimer.current) clearTimeout(retryTimer.current);
-      wsRef.current?.close();
+      if (wsRef.current) {
+        wsRef.current.onclose = null;
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+      setStatus('disconnected');
     };
   }, [url, connect]);
 

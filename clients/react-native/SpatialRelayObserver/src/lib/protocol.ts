@@ -41,11 +41,31 @@ export interface DetectionPacket {
   confidence: number;
 }
 
+export interface DetectedPerson {
+  positionPhone: [number, number, number];
+  jointsPhone: PhoneJoint[];
+  confidence: number;
+}
+
+/** Every person seen in one camera frame; the hub assigns stable ids. */
+export interface DetectionsPacket {
+  type: 'detections';
+  sequence: number;
+  timestampNs: number;
+  people: DetectedPerson[];
+}
+
 export type OutboundPacket =
   | CalibrationPacket
   | PosePacket
   | ManualPosePacket
-  | DetectionPacket;
+  | DetectionPacket
+  | DetectionsPacket;
+
+// Packets the hub sends back to the observer.
+export type InboundPacket =
+  | { type: 'calibrate' } // laptop console pressed "Reset origin"
+  | { type: 'error'; message: string };
 
 // Joint names matching the Python hub and web phone.js
 export const JOINT_NAMES = [

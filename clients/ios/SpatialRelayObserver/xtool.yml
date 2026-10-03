@@ -1,0 +1,5 @@
+version: 1
+# Bundle IDs are global across Apple accounts — change this if signing says it is taken.
+bundleID: com.arnav717.SpatialRelayObserver
+product: SpatialRelayObserver
+infoPath: Info.plist

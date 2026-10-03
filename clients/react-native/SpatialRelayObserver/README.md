@@ -13,7 +13,8 @@ React Native replacement for the web-based `phone.html` observer. Works on **iPh
 | Requires HTTPS for camera | Native app — camera access without HTTPS |
 | Requires HTTPS for sensors | Native sensor access regardless of network |
 | MediaPipe via CDN (WASM) | Same MediaPipe in WebView (network needed once for model download) |
-| D-pad position (manual) | D-pad position (same) + real IMU orientation |
+| D-pad position (manual) | D-pad position + PDR step tracking + real IMU orientation |
+| Fixed range slider | AUTO range: depth estimated from the person's torso size |
 
 ---
 
@@ -35,11 +36,20 @@ npm install
 npx expo start
 ```
 
-Scan the QR code with the **Expo Go** app on your iPhone.
+Scan the QR code with the **Expo Go** app on your iPhone (Expo Go must support SDK 57 — update it from the App Store).
+Everything used here (`react-native-webview`, `expo-camera`, `expo-sensors`) ships inside Expo Go, so no development build is needed.
 
-> [!NOTE]
-> `react-native-webview` requires a **development build** on iOS (not plain Expo Go).
-> Run the EAS Development Build step below if the WebView camera doesn't appear.
+The hub address defaults to the laptop that is running Metro, so if the Python hub runs on the same laptop the app connects with no configuration. Override it in ⚙ settings if the hub runs elsewhere.
+
+### Troubleshooting on iPhone
+
+| Symptom | Fix |
+|---|---|
+| Header stays `CONNECTING` / `DISCONNECTED` | iOS **Settings → Privacy & Security → Local Network → Expo Go** must be ON. Hub must run with `--host 0.0.0.0`. Open `http://<laptop-ip>:8000/health` in iPhone Safari to test reachability. |
+| Works at home, not on campus/office Wi-Fi | Many managed networks block device-to-device traffic (client isolation). Turn on the iPhone **Personal Hotspot** and join the laptop to it (laptop IP is then `172.20.10.x`). |
+| Black camera / "Camera error" banner | Allow camera for Expo Go in iOS Settings, then tap the banner to retry. |
+| "ML error" after Enable Detection | The phone needs internet once to download MediaPipe (~5 MB) from jsDelivr / Google Storage. |
+| Yaw does not change | Allow **Motion & Fitness** for Expo Go in iOS Settings. |
 
 ---
 
@@ -87,15 +97,7 @@ eas build --platform ios --profile production
 
 ### Orientation (replaces web compass)
 
-`expo-sensors` `DeviceMotion` gives the full fused IMU output from Core Motion (iOS) / SensorManager (Android). The app reads `rotation.alpha/beta/gamma` (ZXY Euler) and converts to a quaternion sent to the hub.
-
-```
-rotation.alpha  → yaw   (phone turns left/right)
-rotation.beta   → pitch (phone tilts forward/back)
-rotation.gamma  → roll  (phone tilts sideways)
-```
-
-The hub's `calibration.py` already handles full quaternions — it extracts yaw via `quaternion_to_yaw()`.
+`expo-sensors` `DeviceMotion` gives the full fused IMU output from Core Motion (iOS) / SensorManager (Android). The app composes `rotation.alpha/beta/gamma` (Z-X-Y Euler) into a rotation matrix and takes the horizontal direction of the rear camera as the heading. (Raw `alpha` is unusable when the phone is held upright — pitch ≈ 90° is a gimbal-lock singularity.) The heading relative to calibration is sent as a yaw quaternion; the hub extracts it via `quaternion_to_yaw()`.
 
 ### Camera + Pose Detection (WebView)
 
@@ -105,7 +107,7 @@ Internet connection is needed once to download the MediaPipe model (~5 MB). Afte
 
 ### Position (manual D-pad)
 
-Without ARKit (which requires native modules + Mac/Xcode to compile), position is still set manually. The D-pad sends `pose` packets that the hub treats as the phone's world position.
+Without ARKit, position comes from pedestrian dead-reckoning (one 0.65 m stride per detected step, in the current heading) plus manual D-pad nudges. The laptop console's **Reset origin** button tells the phone to re-calibrate remotely.
 
 **To add ARKit/LiDAR later**: Add a custom native module once you have Xcode access, expose `frame.camera.transform` and `smoothedSceneDepth`, and replace the D-pad with the 6-DoF pose data. The hub's WebSocket protocol is already ready for this — it accepts the exact same `pose` and `detection` packets.
 
@@ -146,10 +148,14 @@ The app sends the same JSON packets as the web phone page:
 // Calibration (tap once when beside laptop webcam)
 { "type": "calibration", "localPose": { "position": [x,y,z], "quaternionXyzw": [x,y,z,w], "timestampNs": 1720000000000000000 } }
 
-// Pose update (25 Hz continuous)
+// Pose update (25 Hz continuous while connected)
 { "type": "pose", "sequence": 42, "localPose": { ... } }
 
-// Detection (on each MediaPipe detection)
+// Detections: every person in one frame (up to 4); hub assigns stable person_NN ids
+{ "type": "detections", "sequence": 44, "timestampNs": ...,
+  "people": [ { "positionPhone": [x,y,z], "jointsPhone": [...], "confidence": 0.85 } ] }
+
+// Single detection (tap-to-mark target; still accepted from older clients)
 { "type": "detection", "sequence": 43, "subjectId": "person_01", "timestampNs": ...,
   "positionPhone": [x,y,z], "jointsPhone": [{"name":"nose","position":[x,y,z],"confidence":0.94}], "confidence": 0.85 }
 ```

@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { MONO_FONT } from '../lib/fonts';
 
 interface DPadProps {
   /** Step size in metres per button press (default 0.5). */
@@ -122,6 +123,6 @@ const styles = StyleSheet.create({
   fineBtnText: {
     color: '#aaa',
     fontSize: 11,
-    fontFamily: 'monospace',
+    fontFamily: MONO_FONT,
   },
 });

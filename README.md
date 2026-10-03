@@ -39,6 +39,7 @@ Processing hub and demonstrator for **deep-learning-based real-time multi-camera
 | **M2 Deep Pose Estimation** | Real-time on-device human landmark detection (MediaPipe Vision) | `cameraWebView.ts`, `rn-mediapipe.js` |
 | **M3 3D Metric Localization** | Pinhole back-projection with adjustable range and patch depth | `src/spatial_relay/geometry.py`, `geometry.ts` |
 | **M4 Shared Frame Calibration**| Rigid coordinate transforms mapping phone and laptop into world $W$ | `src/spatial_relay/calibration.py` |
+| **M4b Multi-Person Tracking** | Stable `person_NN` ids across frames (nearest-neighbour + 1-euro smoothing) | `src/spatial_relay/tracking.py` |
 | **M5 Real-Time Relay** | FastAPI WebSocket server broadcasting at 25 FPS | `src/spatial_relay/server.py` |
 | **M6 AR Projection** | Laptop camera frustum gating, reticle projection, and floor map | `web/viewer.js`, `web/index.html` |
 | **M7 Inertial Odometry** | Gyroscope orientation + PDR (Pedestrian Dead-Reckoning) step engine | `useDeviceMotion.ts` |
@@ -79,7 +80,8 @@ npx expo start --lan
 * Open the **Expo Go** app on your iPhone (iOS 17+ / SDK 57 compatible).
 * Scan the QR code displayed in the terminal.
 * Grant **Camera** and **Motion & Orientation** permissions when prompted.
-* In the app settings (gear icon), set the **Hub Host** to your laptop's Wi-Fi IP (e.g. `172.20.10.2`) and port `8000`.
+* The app connects to the hub on the same laptop that runs Metro automatically. Only if the hub runs on another machine, set its IP in the app settings (gear icon).
+* Header shows `HUB ●` when connected; the laptop console shows `PHONE LIVE`. If not, see *Troubleshooting on iPhone* in `clients/react-native/SpatialRelayObserver/README.md` (Local Network permission, Wi-Fi client isolation).
 
 ---
 
@@ -102,7 +104,7 @@ http://localhost:8000
 
 Both devices start aligned in the shared room coordinate system:
 1. Hold the phone right beside the laptop's webcam, facing forward into the room in the same direction as the laptop screen.
-2. Tap **Calibrate** on the phone (or click **Reset origin (0,0)** on the laptop console).
+2. Tap **Calibrate** on the phone, or click **Reset origin (0,0)** on the laptop console (the hub forwards it to the phone, which re-zeros itself).
 3. Both devices will synchronize to:
    * **Position**: $(X=0.00, Z=0.00)$
    * **Heading**: $0^\circ\text{ (+Z Forward)}$
@@ -111,6 +113,15 @@ Both devices start aligned in the shared room coordinate system:
    * **Step Tracking (PDR)**: Heel-strike impulse detection automatically steps forward $\approx 0.65\text{m}$ in your heading direction.
    * **D-Pad**: Use the on-screen arrows (`↑`, `↓`, `←`, `→`) to manually nudge position by $\pm 0.5\text{m}$.
    * **Target Detection**: Tap **▶ Enable Detection** to detect people with MediaPipe; the target and skeleton joints are localized in 3D and streamed to the laptop map!
+
+---
+
+## Swift vs React Native
+
+Two observer apps share the same hub protocol:
+
+* **Swift (`clients/ios/SpatialRelayObserver`) — recommended on LiDAR iPhones (e.g. iPhone 15 Pro).** ARKit tracking (cm-level 6-DoF instead of step counting), LiDAR depth per joint and on-device Apple Vision pose. Built and installed **from Linux, free**, with [xtool](https://github.com/xtool-org/xtool); a free Apple ID re-signs every 7 days. See its README.
+* **React Native / Expo (`clients/react-native/SpatialRelayObserver`)** — runs in Expo Go on any iPhone or Android with no build step; position is approximate (PDR + D-pad, depth from body size). Good for quick demos and non-LiDAR phones.
 
 ---
 
@@ -127,7 +138,7 @@ Both devices start aligned in the shared room coordinate system:
 │   │       │   ├── screens/        # ObserverScreen main view
 │   │       │   └── components/     # StatusHeader, DPad, RangeSlider
 │   │       └── package.json
-│   ├── ios/                        # Native Swift ARKit / Vision observer (Xcode)
+│   ├── ios/SpatialRelayObserver/   # Native Swift ARKit + LiDAR observer (xtool, builds on Linux)
 │   └── unity/                      # Unity ARCore receiver client
 ├── src/
 │   └── spatial_relay/              # Python processing hub
