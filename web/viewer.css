@@ -617,3 +617,14 @@ canvas#overlay {
   flex-wrap: wrap;
   justify-content: flex-end;
 }
+
+.world-link {
+  margin-left: auto;
+  margin-right: 16px;
+  font: 700 11px 'DM Mono', monospace;
+  color: #bafa59;
+  text-decoration: none;
+  border: 1px solid rgba(186, 250, 89, 0.35);
+  border-radius: 999px;
+  padding: 5px 12px;
+}

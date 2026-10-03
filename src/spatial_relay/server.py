@@ -9,7 +9,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from .models import Pose
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -18,6 +19,10 @@ from .protocol import point_json, pose_from_packet, pose_json, transform_from_pa
 from .transforms import Transform, quaternion_to_yaw, yaw_to_quaternion
 from .camera_calibration import load_intrinsics
 from .tracking import PersonTracker
+from .room import RoomStore
+from .world import WorldState
+
+WORLD_TICK_HZ = 15
 
 log = logging.getLogger("spatial_relay")
 SEND_TIMEOUT_S = 0.5
@@ -31,7 +36,16 @@ class RelayHub:
         self.last_target: dict | None = None
         self.last_targets: dict | None = None
         self.tracker = PersonTracker()
-        self.observer: WebSocket | None = None
+        # One socket per phone, keyed by the `device` query parameter.
+        self.observers: dict[str, WebSocket] = {}
+        # Acks (observer task) and world pushes (world loop) share each phone
+        # socket; a lock per socket keeps the two writers from interleaving.
+        self._send_locks: dict[int, asyncio.Lock] = {}
+        # Map mode: phones relocalized into the scanned ARWorldMap report in one
+        # shared world frame; fused and tracked here, rendered by the 3D view.
+        self.world = WorldState()
+        self.rooms = RoomStore()
+        self.world.room_version = self.rooms.version()
         self.started = time.monotonic()
         self.calibration = SharedFrameCalibration()
         # The laptop camera defines the world origin, so it needs no setup.
@@ -71,7 +85,7 @@ class RelayHub:
 
     @property
     def observer_connected(self) -> bool:
-        return self.observer is not None
+        return bool(self.observers)
 
     async def broadcast(self, packet: dict) -> None:
         self.last_packet = packet
@@ -98,7 +112,7 @@ class RelayHub:
                 self.viewers.discard(viewer)
 
     def status_packet(self) -> dict:
-        return {"type": "observer_status", "connected": self.observer_connected}
+        return {"type": "observer_status", "connected": self.observer_connected, "devices": sorted(self.observers)}
 
     def pose_packet(self) -> dict:
         laptop = self.calibration.world_from_laptop(self.laptop_local_pose)
@@ -109,14 +123,42 @@ class RelayHub:
             "calibrated": self.calibration.ready,
         }
 
-    async def send_to_observer(self, packet: dict) -> bool:
-        if self.observer is None:
-            return False
+    async def send_locked(self, socket: WebSocket, packet: dict) -> None:
+        lock = self._send_locks.setdefault(id(socket), asyncio.Lock())
+        async with lock:
+            await asyncio.wait_for(socket.send_json(packet), SEND_TIMEOUT_S)
+
+    def forget_socket(self, socket: WebSocket) -> None:
+        self._send_locks.pop(id(socket), None)
+
+    async def push_world_to_phones(self, packet: dict) -> None:
+        """Give every shared-map phone the fused world, so each helmet can draw
+        the people the *other* phones see (x-ray through walls)."""
+        targets = [
+            (device_id, socket) for device_id, socket in list(self.observers.items())
+            if self.world.in_map_mode(device_id)
+        ]
+        if targets:
+            await asyncio.gather(*(self._push(socket, packet) for _, socket in targets))
+
+    async def _push(self, socket: WebSocket, packet: dict) -> None:
         try:
-            await asyncio.wait_for(self.observer.send_json(packet), SEND_TIMEOUT_S)
-            return True
+            await self.send_locked(socket, packet)
         except Exception:
-            return False
+            pass  # a slow phone just misses one frame
+
+    async def send_to_observer(self, packet: dict, device_id: str | None = None) -> bool:
+        """Send to one phone, or to every connected phone; True if any received it."""
+        targets = [self.observers[device_id]] if device_id in self.observers else (
+            [] if device_id else list(self.observers.values()))
+        delivered = False
+        for socket in targets:
+            try:
+                await self.send_locked(socket, packet)
+                delivered = True
+            except Exception:
+                pass
+        return delivered
 
     async def update_calibration(self, device: Device, local_pose: dict, start_offset: dict | None = None) -> None:
         pose = pose_from_packet(local_pose)
@@ -279,9 +321,32 @@ class RelayHub:
 
 hub = RelayHub()
 
+
+async def world_loop() -> None:
+    """Fuse every phone's latest people at a fixed rate and push the world to viewers.
+
+    Running on a clock (not per packet) means phone A's frame can never erase
+    the people phone B is reporting.
+    """
+    while True:
+        await asyncio.sleep(1 / WORLD_TICK_HZ)
+        try:
+            if hub.world.active:
+                packet = hub.world.tick()
+                if hub.viewers:
+                    await hub.broadcast(packet)
+                await hub.push_world_to_phones(packet)
+        except Exception as exc:  # never let one bad tick stop the loop
+            log.warning("world tick failed: %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    yield
+    task = asyncio.create_task(world_loop())
+    try:
+        yield
+    finally:
+        task.cancel()
 
 
 app = FastAPI(title="Spatial Relay Hub", version="0.1.0", lifespan=lifespan)
@@ -306,7 +371,48 @@ async def health() -> dict:
         "tracking": hub.tracking,
         "planes": len(hub.planes),
         "anchors": len(hub.anchors),
+        "devices": sorted(hub.observers),
+        "roomVersion": hub.world.room_version,
+        "hasWorldMap": hub.rooms.has_worldmap(),
     }
+
+
+# ── Room model + shared world map (uploaded by the scanning phone) ──────────────
+
+@app.get("/api/room")
+async def get_room() -> dict:
+    room = hub.rooms.load_room()
+    if room is None:
+        raise HTTPException(404, "No room scanned yet")
+    return {"version": hub.world.room_version, "room": room}
+
+
+@app.post("/api/room")
+async def post_room(request: Request) -> dict:
+    try:
+        room = hub.rooms.save_room(await request.body())
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    hub.world.room_version = hub.rooms.version()
+    log.info("room model saved: %d walls", len(room.get("walls", [])))
+    return {"ok": True, "version": hub.world.room_version}
+
+
+@app.get("/api/worldmap")
+async def get_worldmap() -> FileResponse:
+    if not hub.rooms.has_worldmap():
+        raise HTTPException(404, "No world map uploaded yet")
+    return FileResponse(hub.rooms.worldmap_path, media_type="application/octet-stream")
+
+
+@app.post("/api/worldmap")
+async def post_worldmap(request: Request) -> dict:
+    try:
+        size = hub.rooms.save_worldmap(await request.body())
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    log.info("world map saved: %.1f MB", size / 1e6)
+    return {"ok": True, "bytes": size}
 
 @app.get("/latest")
 async def latest() -> dict:
@@ -330,6 +436,23 @@ OBSERVER_HANDLERS = {
 }
 
 
+async def _handle_map_packet(device_id: str, packet: dict) -> bool:
+    """Route shared-map packets to the world state; False if not a map packet."""
+    kind = packet.get("type")
+    if kind == "hello":
+        hub.world.update_hello(device_id, packet)
+        return True
+    if packet.get("frame") != "map":
+        return False
+    if kind == "pose":
+        hub.world.update_pose(device_id, packet)
+        return True
+    if kind == "detections":
+        hub.world.update_people(device_id, packet)
+        return True
+    return False
+
+
 def _yaw_from_packet(packet: dict) -> float:
     if "yawRad" in packet:
         return float(packet["yawRad"])
@@ -339,15 +462,18 @@ def _yaw_from_packet(packet: dict) -> float:
 @app.websocket("/ws/observer")
 async def observer(socket: WebSocket) -> None:
     await socket.accept()
-    previous = hub.observer
-    hub.observer = socket
+    query = getattr(socket, "query_params", None) or {}
+    device_id = str(query.get("device") or "phone")[:40]
+    previous = hub.observers.get(device_id)
+    hub.observers[device_id] = socket
     if previous is not None:
-        # A reconnecting phone replaces its stale half-open socket.
+        # A reconnecting phone replaces its own stale half-open socket.
         try:
             await previous.close()
         except Exception:
             pass
-    log.info("phone observer connected")
+    hub.world.set_connected(device_id, True)
+    log.info("phone observer %r connected", device_id)
     await hub.broadcast(hub.status_packet())
     try:
         while True:
@@ -360,27 +486,32 @@ async def observer(socket: WebSocket) -> None:
                 continue
             try:
                 kind = packet.get("type")
+                if await _handle_map_packet(device_id, packet):
+                    await hub.send_locked(socket, {"type": "ack", "sequence": packet.get("sequence")})
+                    continue
                 handler = OBSERVER_HANDLERS.get(kind)
                 if handler is None:
                     log.warning("phone sent unknown packet type %r", kind)
-                    await socket.send_json({"type": "error", "message": f"Expected one of {', '.join(OBSERVER_HANDLERS)}"})
+                    await hub.send_locked(socket, {"type": "error", "message": f"Expected one of {', '.join(OBSERVER_HANDLERS)}"})
                     continue
                 await handler(packet)
             except Exception as exc:
                 # A single bad packet must not drop the phone's connection.
                 log.warning("phone packet %r rejected: %s", packet.get("type"), exc)
                 try:
-                    await socket.send_json({"type": "error", "message": str(exc)})
+                    await hub.send_locked(socket, {"type": "error", "message": str(exc)})
                 except Exception:
                     pass
                 continue
-            await socket.send_json({"type": "ack", "sequence": packet.get("sequence")})
+            await hub.send_locked(socket, {"type": "ack", "sequence": packet.get("sequence")})
     except WebSocketDisconnect:
         pass
     finally:
-        if hub.observer is socket:
-            hub.observer = None
-            log.info("phone observer disconnected")
+        hub.forget_socket(socket)
+        if hub.observers.get(device_id) is socket:
+            del hub.observers[device_id]
+            hub.world.set_connected(device_id, False)
+            log.info("phone observer %r disconnected", device_id)
             await hub.broadcast(hub.status_packet())
 
 
@@ -418,9 +549,9 @@ async def viewer(socket: WebSocket) -> None:
                 elif kind == "pose":
                     await hub.update_pose(Device.LAPTOP, packet["localPose"])
                 elif kind == "request_phone_calibration":
-                    # Laptop console "Reset origin": ask the phone to zero itself so the
-                    # next pose stream starts at (0,0,0) facing +Z.
-                    if not await hub.send_to_observer({"type": "calibrate"}):
+                    # Laptop console "Reset origin": ask the phone(s) to zero themselves so
+                    # the next pose stream starts at (0,0,0) facing +Z.
+                    if not await hub.send_to_observer({"type": "calibrate"}, packet.get("device")):
                         await hub.set_manual_pose(Device.PHONE, [0.0, 0.0, 0.0], 0.0)
             except (ValueError, KeyError, TypeError, IndexError) as exc:
                 await socket.send_json({"type": "error", "message": f"Bad packet: {exc!r}"})

@@ -64,12 +64,29 @@ If signing fails because the bundle ID is taken, change `bundleID` in `xtool.yml
 
 If the app is backgrounded, ARKit may restart tracking from a new origin — calibrate again.
 
+## Shared map mode (several phones, 3D world view)
+
+- **Scan rooms** (LiDAR only): RoomPlan captures each room on the app's own ARSession. Use
+  **Finish this room**, then **Next room**, then **Save & share**. This uploads the room model
+  (`POST /api/room`) and the ARWorldMap (`POST /api/worldmap`).
+- **Join shared map** (any ARKit iPhone): downloads the map and relocalizes. After that, poses and
+  people are sent in the shared frame (`frame: "map"`), and the laptop's `world.html` shows everyone.
+- Without LiDAR, each person's depth is estimated from their torso length (about 0.5 m), at roughly
+  ±20–30% accuracy.
+- In shared map mode each phone shows people seen by *other* phones as x-ray skeletons in AR, marked
+  **BEHIND WALL** when a scanned wall is in between (`WorldOverlay.swift`).
+- While scanning, captured surfaces are drawn live in AR, plus a mini floor plan.
+- Name each phone in ⚙ settings. The name is the `device` id the hub and 3D view use.
+
 ## Code
 
 ```
 Sources/SpatialRelayObserver/
 ├── SpatialRelayObserverApp.swift   SwiftUI UI, AR camera view, skeleton overlay, settings
-├── ObserverController.swift        ARSession, pose streaming, Vision + LiDAR joint localization
+├── ObserverController.swift        ARSession, modes (calibrated / scanning / relocalizing / shared map), Vision + depth
+├── RoomScanner.swift               RoomPlan multi-room scan → compact room JSON
+├── WorldOverlay.swift              SceneKit AR: remote people (x-ray), other phones, walls, live scan
+├── HubAPI.swift                    Room + world-map upload / download
 ├── RoomFrame.swift                 ARKit world → hub room frame (+X right, +Y up, +Z forward)
 ├── WebSocketRelay.swift            Reconnecting WebSocket client
 └── Protocol.swift                  Hub packet types

@@ -7,6 +7,8 @@ final class WebSocketRelay: ObservableObject {
 
     @Published private(set) var state: State = .disconnected
     var onMessage: ((InboundMessage) -> Void)?
+    /// Raw JSON of every text message, for packets with richer payloads (e.g. `world`).
+    var onRawMessage: ((String, Data) -> Void)?
 
     private let session = URLSession(configuration: .default)
     private let encoder = JSONEncoder()
@@ -21,6 +23,9 @@ final class WebSocketRelay: ObservableObject {
         retry = 0
         open()
     }
+
+    /// Fires on every transition to `.connected` (e.g. to re-send a hello).
+    var onConnected: (() -> Void)?
 
     func reconnect() {
         retry = 0
@@ -51,6 +56,7 @@ final class WebSocketRelay: ObservableObject {
                 if error == nil {
                     self.state = .connected
                     self.retry = 0
+                    self.onConnected?()
                 } else {
                     self.scheduleReconnect(gen)
                 }
@@ -68,6 +74,7 @@ final class WebSocketRelay: ObservableObject {
                     if let data = text.data(using: .utf8),
                        let msg = try? JSONDecoder().decode(InboundMessage.self, from: data) {
                         self.onMessage?(msg)
+                        self.onRawMessage?(msg.type, data)
                     }
                     self.receive(task, gen)
                 case .success:

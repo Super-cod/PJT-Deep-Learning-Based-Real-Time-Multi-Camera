@@ -25,8 +25,8 @@ struct ContentView: View {
         ZStack {
             GeometryReader { geo in
                 ZStack {
-                    ARCameraView(session: observer.session)
-                    SkeletonOverlay(skeletons: observer.overlay)
+                    ARCameraView(session: observer.session, scene: observer.overlay.scene)
+                    SkeletonOverlay(skeletons: observer.overlayJoints)
                 }
                 .onAppear { observer.viewportSize = geo.size }
                 .onChange(of: geo.size) { _, size in observer.viewportSize = size }
@@ -40,11 +40,11 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: $showSettings) {
-            SettingsView(host: observer.hubHost, port: observer.hubPort) { host, port in
-                observer.saveSettings(host: host, port: port)
+            SettingsView(host: observer.hubHost, port: observer.hubPort, name: observer.deviceName) { host, port, name in
+                observer.saveSettings(host: host, port: port, name: name)
                 showSettings = false
             }
-            .presentationDetents([.medium])
+            .presentationDetents([.medium, .large])
         }
         .task {
             observer.start()
@@ -92,11 +92,46 @@ struct ContentView: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-            Text(observer.targetText)
-                .font(.caption.monospaced())
-                .foregroundStyle(observer.overlay.isEmpty ? Color.secondary : lime)
-            Text(observer.poseText)
-                .font(.caption.monospaced())
+            if observer.mode == .scanning {
+                scanPanel
+            } else {
+                Text(observer.targetText)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(observer.overlayJoints.isEmpty ? Color.secondary : lime)
+                Text(observer.poseText)
+                    .font(.caption.monospaced())
+                modeButtons
+            }
+        }
+        .padding(14)
+        .background(.black.opacity(0.7))
+        .disabled(observer.busy)
+        .overlay { if observer.busy { ProgressView().tint(lime) } }
+    }
+
+    @ViewBuilder
+    private var modeButtons: some View {
+        HStack(spacing: 8) {
+            Button { observer.joinSharedMap() } label: {
+                Label(observer.mode == .sharedMap ? "Re-join map" : "Join shared map", systemImage: "map")
+                    .font(.footnote.bold())
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+            }
+            .buttonStyle(.bordered)
+            .tint(lime)
+            if RoomScanner.isSupported {
+                Button { observer.startScan() } label: {
+                    Label("Scan rooms", systemImage: "cube.transparent")
+                        .font(.footnote.bold())
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                }
+                .buttonStyle(.bordered)
+                .tint(.cyan)
+            }
+        }
+        if observer.mode == .calibratedRoom {
             Button {
                 observer.calibrate()
             } label: {
@@ -108,18 +143,129 @@ struct ContentView: View {
             .buttonStyle(.borderedProminent)
             .tint(observer.calibrated ? .gray : lime)
             .foregroundStyle(.black)
+        } else {
+            HStack {
+                Text(observer.mode == .sharedMap ? "● SHARED MAP" : "◌ RELOCALIZING…")
+                    .font(.caption.monospaced().bold())
+                    .foregroundStyle(observer.mode == .sharedMap ? lime : .orange)
+                Spacer()
+                Toggle("Walls", isOn: $observer.showRoomWalls)
+                    .toggleStyle(.button)
+                    .font(.caption)
+                    .tint(lime)
+            }
+            if observer.mode == .sharedMap && !observer.remoteText.isEmpty {
+                Text(observer.remoteText)
+                    .font(.caption.monospaced().bold())
+                    .foregroundStyle(observer.remoteText.contains("behind") ? .orange : lime)
+            }
         }
-        .padding(14)
-        .background(.black.opacity(0.7))
+    }
+
+    @ViewBuilder
+    private var scanPanel: some View {
+        let scanner = observer.scanner
+        HStack(alignment: .top, spacing: 10) {
+            ScanPlanView(walls: scanner.planWalls, openings: scanner.planOpenings, pose: observer.planPose)
+                .frame(width: 130, height: 130)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Rooms captured: \(scanner.roomsCaptured)")
+                    .font(.caption.monospaced().bold())
+                Text("Walls appear in cyan as they are captured. Cover every wall and corner.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        if !scanner.liveSummary.isEmpty {
+            Text(scanner.liveSummary).font(.caption.monospaced()).foregroundStyle(lime)
+        }
+        if !scanner.instruction.isEmpty {
+            Text(scanner.instruction).font(.caption).foregroundStyle(.orange)
+        }
+        switch scanner.state {
+        case .scanning:
+            scanButton("Finish this room", tint: lime) { observer.finishRoom() }
+        case .processing:
+            ProgressView("Processing room…").tint(lime)
+        case .roomReady:
+            HStack(spacing: 8) {
+                scanButton("Next room", tint: .cyan) { observer.nextRoom() }
+                scanButton("Save & share", tint: lime) { observer.uploadScan() }
+            }
+        case .failed(let message):
+            Text(message).font(.caption).foregroundStyle(.red)
+            scanButton("Try again", tint: .orange) { observer.cancelScan(); observer.startScan() }
+        case .idle:
+            EmptyView()
+        }
+        Button("Cancel scan", role: .cancel) { observer.cancelScan() }
+            .font(.footnote)
+    }
+
+    private func scanButton(_ title: String, tint: Color, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.callout.bold())
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(tint)
+        .foregroundStyle(.black)
+    }
+}
+
+/// Top-down floor plan of what RoomPlan has captured, with the phone's position.
+struct ScanPlanView: View {
+    let walls: [RoomScanner.PlanSegment]
+    let openings: [RoomScanner.PlanSegment]
+    /// x, z, heading (radians)
+    let pose: SIMD3<Float>?
+
+    var body: some View {
+        Canvas { context, size in
+            let points = (walls + openings).flatMap { [$0.a, $0.b] } + (pose.map { [SIMD2($0.x, $0.y)] } ?? [])
+            guard !points.isEmpty else {
+                context.draw(Text("scanning…").font(.caption2).foregroundColor(.secondary),
+                             at: CGPoint(x: size.width / 2, y: size.height / 2))
+                return
+            }
+            // Fit everything (with 0.5 m margin) into the square, +X right, +Z down.
+            let minP = points.reduce(points[0]) { simd_min($0, $1) } - 0.5
+            let maxP = points.reduce(points[0]) { simd_max($0, $1) } + 0.5
+            let scale = Float(min(size.width, size.height)) / max(maxP.x - minP.x, maxP.y - minP.y, 1)
+            func pt(_ p: SIMD2<Float>) -> CGPoint {
+                CGPoint(x: CGFloat((p.x - minP.x) * scale), y: CGFloat((p.y - minP.y) * scale))
+            }
+            for (segments, color, width) in [(walls, Color.cyan, 3.0), (openings, Color.orange, 4.0)] {
+                var path = Path()
+                for s in segments { path.move(to: pt(s.a)); path.addLine(to: pt(s.b)) }
+                context.stroke(path, with: .color(color), lineWidth: width)
+            }
+            if let pose {
+                let c = pt(SIMD2(pose.x, pose.y))
+                let dir = CGPoint(x: CGFloat(sin(pose.z)) * 14, y: -CGFloat(cos(pose.z)) * 14)
+                var arrow = Path()
+                arrow.move(to: c)
+                arrow.addLine(to: CGPoint(x: c.x + dir.x, y: c.y + dir.y))
+                context.stroke(arrow, with: .color(lime), lineWidth: 2)
+                context.fill(Path(ellipseIn: CGRect(x: c.x - 4, y: c.y - 4, width: 8, height: 8)), with: .color(lime))
+            }
+        }
+        .background(Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.15)))
     }
 }
 
 /// Renders the ARKit camera feed for an externally owned session.
 struct ARCameraView: UIViewRepresentable {
     let session: ARSession
+    /// World-anchored 3D content (remote people, walls, live scan).
+    let scene: SCNScene
 
     func makeUIView(context: Context) -> ARSCNView {
         let view = ARSCNView(frame: .zero)
+        view.scene = scene
         view.session = session
         view.automaticallyUpdatesLighting = false
         view.rendersCameraGrain = false
@@ -179,7 +325,8 @@ struct SkeletonOverlay: View {
 struct SettingsView: View {
     @State var host: String
     @State var port: Int
-    let onSave: (String, Int) -> Void
+    @State var name: String
+    let onSave: (String, Int, String) -> Void
 
     var body: some View {
         NavigationStack {
@@ -198,12 +345,22 @@ struct SettingsView: View {
                 } footer: {
                     Text("The laptop's Wi-Fi IP (Linux: `ip -4 addr`). Phone and laptop must be on the same network. Test it by opening http://\(host.isEmpty ? "<ip>" : host):\(port)/health in Safari.")
                 }
+                Section {
+                    TextField("Phone-A", text: $name)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .font(.body.monospaced())
+                } header: {
+                    Text("This phone's name")
+                } footer: {
+                    Text("Shown on the laptop's 3D view. Use a different name on each phone.")
+                }
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save & Connect") { onSave(host, port) }
+                    Button("Save & Connect") { onSave(host, port, name) }
                         .disabled(host.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }

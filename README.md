@@ -42,6 +42,9 @@ Processing hub and demonstrator for **deep-learning-based real-time multi-camera
 | **M4b Multi-Person Tracking** | Stable `person_NN` ids across frames (nearest-neighbour + 1-euro smoothing) | `src/spatial_relay/tracking.py` |
 | **M5 Real-Time Relay** | FastAPI WebSocket server broadcasting at 25 FPS | `src/spatial_relay/server.py` |
 | **M6 AR Projection** | Laptop camera frustum gating, skeleton projection and floor map | `web/viewer.js`, `web/index.html` |
+| **M8 Room Model & Shared Map** | RoomPlan multi-room scan + ARWorldMap relocalization | `RoomScanner.swift`, `src/spatial_relay/room.py` |
+| **M9 Multi-Phone Fusion** | Cross-camera person fusion + 15 Hz world packet | `src/spatial_relay/world.py` |
+| **M10 3D World View** | three.js god view, helmet views, through-wall sight lines | `web/world.html`, `web/world.js` |
 | **M7 Visual-Inertial Odometry** | ARKit world tracking, gravity aligned | `ObserverController.swift` |
 
 ---
@@ -97,6 +100,57 @@ http://localhost:8000
 
 ---
 
+## Shared 3D World: multiple phones, see through walls
+
+![3D world view](docs/images/world-orbit.png)
+
+The laptop becomes a global "god view" at **`http://localhost:8000/world.html`**: a 3D model of the
+rooms, every phone and its view cone, and every person any phone detects. A person seen by
+phone A but hidden by a wall from phone B is drawn through the wall, with a dashed orange line
+and a "behind wall from B" label.
+
+1. **Scan the rooms (LiDAR iPhone, once).** Tap **Scan rooms**, walk each room slowly, then
+   **Finish this room**. Tap **Next room** and walk through the doorway for the next one. Finally tap
+   **Save & share**. RoomPlan's walls, doors, windows and furniture, plus the ARKit world map, are
+   uploaded to the hub (`data/room/`).
+2. **Join from every other phone.** Tap **Join shared map**, then look around a scanned area until
+   it says *Relocalized*. Any ARKit iPhone works. Phones without LiDAR estimate distance from body size.
+3. Give each phone its own name in ⚙ settings (e.g. `Helmet-A`, `Helmet-B`).
+4. Open `world.html` on the laptop. Use **Orbit**, **Top-down**, or **👁 Helmet-X** to see exactly what
+   that phone sees, with walls see-through.
+
+![Helmet view through a wall](docs/images/world-helmet-view.png)
+
+**X-ray on the phones themselves.** The hub also pushes the fused world to every phone in the shared
+map. Each phone draws the people that *other* phones see as glowing 3D skeletons in its own camera
+view, on top of everything, so they show through real walls. Labels give distance, which phone sees
+them, and **BEHIND WALL** when a scanned wall is in between. Other phones show as markers. **Walls**
+toggles the faint outline of the scanned walls.
+
+While scanning, captured walls (cyan), doors and windows (orange / blue) and furniture appear live in
+AR. A mini top-down floor plan with your position shows what is still missing.
+
+How it works:
+- Every phone tracks in the same ARWorldMap frame, so no laptop calibration is needed.
+- Each phone streams its 6-DoF pose and people in that frame (`frame: "map"`) over
+  `/ws/observer?device=<name>`.
+- The hub fuses people seen by several phones (within 0.5 m), assigns stable `person_NN` ids and
+  pushes a `world` packet at 15 Hz.
+- The website raycasts from each phone to each person against the scanned walls to decide
+  "sees directly" or "behind a wall".
+
+The "see-through" effect comes from sharing what *another* phone sees. Every person must be in some
+phone's camera view.
+
+**Demo without phones:**
+```bash
+PYTHONPATH=src python3 -m spatial_relay.simulate_world --hub http://localhost:8000
+```
+This uploads a synthetic 2-room scan and streams two walking helmets. Set `SPATIAL_RELAY_ROOM_DIR`
+on the hub to keep a real scan untouched.
+
+---
+
 ## Calibration & Coordinate Synchronization
 
 1. Hold the phone right beside the laptop's webcam, rear camera facing the same direction as the webcam.
@@ -120,11 +174,15 @@ If the app is backgrounded, ARKit may restart tracking from a new origin — cal
 │       ├── server.py               # FastAPI WebSocket server & packet relay
 │       ├── calibration.py          # Shared coordinate transforms
 │       ├── tracking.py             # Multi-person identity tracking
+│       ├── world.py                # Multi-phone shared-map state & fusion
+│       ├── room.py                 # Scanned room model + ARWorldMap storage
+│       ├── simulate_world.py       # Phone-free demo of the 3D world view
 │       ├── localization.py         # Depth sampling & back-projection
 │       ├── camera_calibration.py   # OpenCV checkerboard camera calibrator
 │       └── models.py               # Data schemas
 ├── web/                            # Laptop AR Console (HTML/CSS/JS)
-│   ├── index.html                  # Main AR console dashboard
+│   ├── world.html / world.js       # 3D world god view (three.js, vendored in web/vendor/)
+│   ├── index.html                  # Laptop-camera AR console
 │   ├── viewer.js                   # Canvas AR overlay & 2D map renderer
 │   └── viewer.css                  # Dark-mode telemetry styling
 └── tests/                          # Automated coordinate, tracking & hub tests
