@@ -9,12 +9,12 @@ Processing hub and demonstrator for **deep-learning-based real-time multi-camera
 ```
  ┌───────────────────────────┐                 ┌───────────────────────────┐
  │   iPhone Mobile Observer  │                 │    Laptop AR Console      │
- │  (Expo Go / React Native) │                 │      (Web / Browser)      │
+ │   (Swift · ARKit · LiDAR) │                 │      (Web / Browser)      │
  │                           │                 │                           │
- │ • Rear Camera Stream      │                 │ • Webcam Pinhole Viewport │
- │ • MediaPipe Pose (33 pts) │                 │ • Frustum Gating Overlays │
- │ • Gyroscope Heading (Yaw) │                 │ • Real-time 2D Floor Map  │
- │ • PDR Walking Step Engine │                 │ • Interactive Calibration │
+ │ • ARKit 6-DoF Tracking    │                 │ • Webcam Pinhole Viewport │
+ │ • Apple Vision Body Pose  │                 │ • Frustum Gating Overlays │
+ │ • LiDAR Per-Joint Depth   │                 │ • Real-time 2D Floor Map  │
+ │ • Multi-Person Detection  │                 │ • Interactive Calibration │
  └─────────────┬─────────────┘                 └─────────────▲─────────────┘
                │                                             │
                │  WebSocket: /ws/observer                    │  WebSocket: /ws/viewer
@@ -24,7 +24,7 @@ Processing hub and demonstrator for **deep-learning-based real-time multi-camera
       │                     (FastAPI + Uvicorn + NumPy)                    │
       │                                                                    │
       │ • Shared coordinate frame calibration (T_world_from_phone)         │
-      │ • 3D target pinhole back-projection and metric localization        │
+      │ • Multi-person tracking with stable person_NN ids                  │
       │ • 25 Hz continuous pose broadcasting and viewer synchronization    │
       └────────────────────────────────────────────────────────────────────┘
 ```
@@ -35,14 +35,14 @@ Processing hub and demonstrator for **deep-learning-based real-time multi-camera
 
 | Module | Description | Implementation |
 |---|---|---|
-| **M1 Acquisition Contract** | Timestamped RGB, 3D metric joints, and 6-DoF pose schema | `src/spatial_relay/models.py`, `protocol.ts` |
-| **M2 Deep Pose Estimation** | Real-time on-device human landmark detection (MediaPipe Vision) | `cameraWebView.ts`, `rn-mediapipe.js` |
-| **M3 3D Metric Localization** | Pinhole back-projection with adjustable range and patch depth | `src/spatial_relay/geometry.py`, `geometry.ts` |
-| **M4 Shared Frame Calibration**| Rigid coordinate transforms mapping phone and laptop into world $W$ | `src/spatial_relay/calibration.py` |
+| **M1 Acquisition Contract** | Timestamped pose, 3D metric joints and detection packets | `src/spatial_relay/models.py`, `clients/ios/.../Protocol.swift` |
+| **M2 Deep Pose Estimation** | On-device human body pose (Apple Vision, multi-person) | `clients/ios/.../ObserverController.swift` |
+| **M3 3D Metric Localization** | LiDAR depth sampling + pinhole back-projection per joint | `ObserverController.swift`, `src/spatial_relay/localization.py` |
+| **M4 Shared Frame Calibration**| Rigid coordinate transforms mapping phone and laptop into world $W$ | `src/spatial_relay/calibration.py`, `RoomFrame.swift` |
 | **M4b Multi-Person Tracking** | Stable `person_NN` ids across frames (nearest-neighbour + 1-euro smoothing) | `src/spatial_relay/tracking.py` |
 | **M5 Real-Time Relay** | FastAPI WebSocket server broadcasting at 25 FPS | `src/spatial_relay/server.py` |
-| **M6 AR Projection** | Laptop camera frustum gating, reticle projection, and floor map | `web/viewer.js`, `web/index.html` |
-| **M7 Inertial Odometry** | Gyroscope orientation + PDR (Pedestrian Dead-Reckoning) step engine | `useDeviceMotion.ts` |
+| **M6 AR Projection** | Laptop camera frustum gating, skeleton projection and floor map | `web/viewer.js`, `web/index.html` |
+| **M7 Visual-Inertial Odometry** | ARKit world tracking, gravity aligned | `ObserverController.swift` |
 
 ---
 
@@ -65,23 +65,20 @@ The hub is now active on port `8000`. You can verify health at `http://localhost
 
 ---
 
-### 2. Start the Mobile Observer App (iPhone)
+### 2. Install the iPhone Observer App
 
-The modern mobile observer client is built with **React Native & Expo SDK 57**, requiring no Mac or Xcode to build or test.
+The observer is a native Swift app (ARKit + LiDAR + Apple Vision), built and installed **from Linux with a free Apple ID** using [xtool](https://github.com/xtool-org/xtool). One-time setup (Swift toolchain, Xcode.xip SDK, `xtool auth`) is in [`clients/ios/SpatialRelayObserver/README.md`](clients/ios/SpatialRelayObserver/README.md).
 
 ```bash
-cd clients/react-native/SpatialRelayObserver
-npm install
-
-# Start the Expo bundler:
-npx expo start --lan
+cd clients/ios/SpatialRelayObserver
+. ~/.local/share/swiftly/env.sh
+xtool dev        # builds, signs and installs over USB
 ```
 
-* Open the **Expo Go** app on your iPhone (iOS 17+ / SDK 57 compatible).
-* Scan the QR code displayed in the terminal.
-* Grant **Camera** and **Motion & Orientation** permissions when prompted.
-* The app connects to the hub on the same laptop that runs Metro automatically. Only if the hub runs on another machine, set its IP in the app settings (gear icon).
-* Header shows `HUB ●` when connected; the laptop console shows `PHONE LIVE`. If not, see *Troubleshooting on iPhone* in `clients/react-native/SpatialRelayObserver/README.md` (Local Network permission, Wi-Fi client isolation).
+* Requires a LiDAR iPhone (12 Pro or later Pro models) for person detection, iOS 17+.
+* Free Apple ID installs expire after 7 days — re-run `xtool dev` to refresh.
+* In the app, tap ⚙ and enter the laptop's IP (`ip -4 addr`) and port `8000`. Allow **Camera** and **Local Network**.
+* The header shows a green `HUB` when connected; the laptop console shows `PHONE LIVE`. If not, open `http://<laptop-ip>:8000/health` in iPhone Safari to test reachability.
 
 ---
 
@@ -95,33 +92,19 @@ http://localhost:8000
 
 * Click **Start laptop camera** to activate the webcam AR overlay.
 * The console will show:
-  * **AR Webcam Viewport**: Displays augmented skeleton overlays when the person is in the laptop's field of view.
-  * **Top-Down Shared Room Map**: A metric grid showing the live positions of the Laptop (origin `0,0`), moving Phone, and detected Person.
+  * **AR Webcam Viewport**: Augmented skeleton overlays for every person in the laptop's field of view.
+  * **Top-Down Shared Room Map**: A metric grid showing the live positions of the Laptop (origin `0,0`), moving Phone, and each tracked person.
 
 ---
 
 ## Calibration & Coordinate Synchronization
 
-Both devices start aligned in the shared room coordinate system:
-1. Hold the phone right beside the laptop's webcam, facing forward into the room in the same direction as the laptop screen.
+1. Hold the phone right beside the laptop's webcam, rear camera facing the same direction as the webcam.
 2. Tap **Calibrate** on the phone, or click **Reset origin (0,0)** on the laptop console (the hub forwards it to the phone, which re-zeros itself).
-3. Both devices will synchronize to:
-   * **Position**: $(X=0.00, Z=0.00)$
-   * **Heading**: $0^\circ\text{ (+Z Forward)}$
-4. Now walk around the room with the phone:
-   * **Heading (Yaw)**: Gyroscope tracks orientation continuously with zero translational drift.
-   * **Step Tracking (PDR)**: Heel-strike impulse detection automatically steps forward $\approx 0.65\text{m}$ in your heading direction.
-   * **D-Pad**: Use the on-screen arrows (`↑`, `↓`, `←`, `→`) to manually nudge position by $\pm 0.5\text{m}$.
-   * **Target Detection**: Tap **▶ Enable Detection** to detect people with MediaPipe; the target and skeleton joints are localized in 3D and streamed to the laptop map!
+3. Both devices are now synchronized to position $(X=0, Z=0)$, heading $0^\circ$ (+Z forward).
+4. Walk around: ARKit tracks the phone in metres, and every detected person is localized with LiDAR depth and streamed to the laptop with a stable `person_NN` id.
 
----
-
-## Swift vs React Native
-
-Two observer apps share the same hub protocol:
-
-* **Swift (`clients/ios/SpatialRelayObserver`) — recommended on LiDAR iPhones (e.g. iPhone 15 Pro).** ARKit tracking (cm-level 6-DoF instead of step counting), LiDAR depth per joint and on-device Apple Vision pose. Built and installed **from Linux, free**, with [xtool](https://github.com/xtool-org/xtool); a free Apple ID re-signs every 7 days. See its README.
-* **React Native / Expo (`clients/react-native/SpatialRelayObserver`)** — runs in Expo Go on any iPhone or Android with no build step; position is approximate (PDR + D-pad, depth from body size). Good for quick demos and non-LiDAR phones.
+If the app is backgrounded, ARKit may restart tracking from a new origin — calibrate again.
 
 ---
 
@@ -130,29 +113,21 @@ Two observer apps share the same hub protocol:
 ```
 .
 ├── clients/
-│   ├── react-native/
-│   │   └── SpatialRelayObserver/   # Modern Expo SDK 57 iOS observer client
-│   │       ├── src/
-│   │       │   ├── hooks/          # useDeviceMotion (PDR + Gyro), useWebSocket
-│   │       │   ├── lib/            # cameraWebView, geometry, protocol, storage
-│   │       │   ├── screens/        # ObserverScreen main view
-│   │       │   └── components/     # StatusHeader, DPad, RangeSlider
-│   │       └── package.json
 │   ├── ios/SpatialRelayObserver/   # Native Swift ARKit + LiDAR observer (xtool, builds on Linux)
 │   └── unity/                      # Unity ARCore receiver client
 ├── src/
 │   └── spatial_relay/              # Python processing hub
 │       ├── server.py               # FastAPI WebSocket server & packet relay
 │       ├── calibration.py          # Shared coordinate transforms
-│       ├── geometry.py             # 3D back-projection & ray intersection
+│       ├── tracking.py             # Multi-person identity tracking
+│       ├── localization.py         # Depth sampling & back-projection
 │       ├── camera_calibration.py   # OpenCV checkerboard camera calibrator
-│       └── models.py               # Pydantic data schemas
+│       └── models.py               # Data schemas
 ├── web/                            # Laptop AR Console (HTML/CSS/JS)
 │   ├── index.html                  # Main AR console dashboard
-│   ├── viewer.js                   # WebGL/Canvas AR overlay & 2D map renderer
-│   ├── viewer.css                  # Dark-mode telemetry styling
-│   └── rn-mediapipe.js             # MediaPipe vision module
-└── tests/                          # Automated coordinate & depth unit tests
+│   ├── viewer.js                   # Canvas AR overlay & 2D map renderer
+│   └── viewer.css                  # Dark-mode telemetry styling
+└── tests/                          # Automated coordinate, tracking & hub tests
 ```
 
 ---

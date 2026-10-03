@@ -1,7 +1,7 @@
 import Foundation
 
 // Packets matching the Python hub's /ws/observer protocol
-// (src/spatial_relay/server.py and clients/react-native/.../lib/protocol.ts).
+// (src/spatial_relay/server.py).
 
 struct LocalPose: Encodable {
     let position: [Float]

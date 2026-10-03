@@ -1,16 +1,12 @@
 # Spatial Relay — Native iOS Observer (Swift, ARKit + LiDAR)
 
-Native observer for LiDAR iPhones (12 Pro and later, e.g. iPhone 15 Pro). Compared with the React Native app it gives:
+Native observer for LiDAR iPhones (12 Pro and later Pro models, e.g. iPhone 15 Pro):
 
-| | React Native app | This app |
-|---|---|---|
-| Phone position | Step counting (PDR) + D-pad | ARKit visual-inertial tracking (cm-level, 6-DoF) |
-| Heading | Gyro/compass fusion | ARKit, gravity-aligned |
-| Person depth | Estimated from torso size | LiDAR depth per joint |
-| Camera pitch | Ignored | Fully accounted for |
-| Pose model | MediaPipe (WebView, needs internet) | Apple Vision (on-device, offline) |
+- ARKit visual-inertial tracking (cm-level, 6-DoF, gravity aligned)
+- Apple Vision body pose, on-device and offline, up to 6 people per frame
+- LiDAR depth per joint, with camera pitch fully accounted for
 
-It speaks the same `/ws/observer` protocol, so the hub and the laptop website are unchanged.
+It streams to the hub's `/ws/observer` WebSocket; the laptop website shows the results.
 
 It is a plain SwiftPM package built with **[xtool](https://github.com/xtool-org/xtool)** — no Mac, no Xcode, no paid developer account.
 

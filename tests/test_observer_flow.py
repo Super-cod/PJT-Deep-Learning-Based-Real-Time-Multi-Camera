@@ -1,4 +1,4 @@
-"""Observer flow matching what the Expo client actually sends.
+"""Observer flow matching what the phone observer actually sends.
 
 The client sends ONE `calibration` packet when it connects (and on every
 reconnect), then streams `pose` at 25 Hz. It must never send `manual_pose`
