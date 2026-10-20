@@ -1,6 +1,8 @@
 # Xenon
 
-Processing hub and demonstrator for **deep-learning-based real-time multi-camera human localization and AR-assisted situational awareness**. The system synchronizes multiple observer viewpoints into a single unified 3D room coordinate system: iPhones act as helmet-mounted observers that track themselves with ARKit and localize every person they see in 3D with LiDAR; a Python hub fuses all phones in one shared frame and tracks people with stable ids; the laptop shows a live 3D world view of the scanned rooms, phones and people, including people hidden behind walls.
+A multi-camera human-localization system. Several iPhones act as helmet-mounted observers: each tracks its own pose with ARKit and locates every person it sees in 3D using LiDAR depth and Apple Vision body pose. A Python (FastAPI) hub fuses all phones into one shared frame, tracks people with stable ids, and a browser view renders the scanned rooms, phones and people, including people hidden behind walls.
+
+The pose estimation uses Apple's pre-trained on-device models; this repository does not train any neural network. The engineering here is the multi-camera geometry, fusion, tracking, protocol and visualisation.
 
 ---
 
@@ -46,6 +48,27 @@ Processing hub and demonstrator for **deep-learning-based real-time multi-camera
 | **M11 Body Model** | Person-segmented LiDAR depth, 19 joints, per-joint 1-euro smoothing, learned rigid limb lengths, mannequin rendering | `ObserverController.swift`, `src/xenon/skeleton.py` |
 | **M10 3D World View** | three.js god view, helmet views, through-wall sight lines | `web/index.html`, `web/world.js` |
 | **M7 Visual-Inertial Odometry** | ARKit world tracking, gravity aligned | `ObserverController.swift` |
+
+---
+
+## Status & verification
+
+| Part | Status |
+| :--- | :--- |
+| Python hub, fusion, tracking, calibration | **135 automated tests pass** (`pytest`, Python 3.11, no iPhone needed) |
+| 3D web view + phone-free simulation | Starts and serves; `xenon.simulate_world` streams two simulated helmets and a synthetic two-room scan (see "Demo without phones") |
+| iPhone app (ARKit, LiDAR, RoomPlan) | Needs a LiDAR iPhone, iOS 17+, a free Apple ID and `xtool`. Not covered by automated tests. |
+| Localization accuracy | **Not measured.** No ground-truth error numbers are claimed. |
+
+Run the tests:
+
+```bash
+pip install -r requirements.txt httpx
+pip install -e .
+pytest
+```
+
+Try it without any phone: start the hub (step 1 below), run `PYTHONPATH=src python3 -m xenon.simulate_world --hub http://localhost:8000`, and open `http://localhost:8000`.
 
 ---
 
